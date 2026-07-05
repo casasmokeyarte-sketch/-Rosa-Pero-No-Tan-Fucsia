@@ -1,0 +1,207 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-cyber-bg: #04070e;
+  --color-cyber-card: #0a0f1d;
+  --color-cyber-border: #231936;
+  --color-cyber-pink: #ff007f; /* Electric neon pink - Ultra vivid */
+  --color-cyber-orange: #ff5500; /* Neon warning orange - Ultra vivid */
+  --color-cyber-green: #00ff66; /* Nuclear radioactive green - Ultra vivid */
+  --color-cyber-blue: #00f3ff; /* Plasma cyan reactor blue - Ultra vivid */
+  --color-cyber-accent: #ff0055;
+  
+  --animate-scanline: scanline 8s linear infinite;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-cyber-glow: cyber-glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes cyber-glow {
+  0% {
+    text-shadow: 0 0 4px rgba(236, 72, 153, 0.2), 0 0 10px rgba(236, 72, 153, 0.2);
+  }
+  100% {
+    text-shadow: 0 0 8px rgba(236, 72, 153, 0.6), 0 0 20px rgba(236, 72, 153, 0.4);
+  }
+}
+
+/* Custom Cyberpunk Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #070b13;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #f97316;
+}
+
+/* Print Invoice CSS Optimization */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm 12mm 15mm 12mm;
+  }
+  
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+    font-size: 10pt !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  /* Convert dark theme colors to absolute crisp white backgrounds to save printer ink */
+  .print-card, 
+  .bg-cyber-card, 
+  .bg-slate-900, 
+  .bg-cyber-bg, 
+  .bg-slate-950, 
+  .bg-slate-900\/60, 
+  .bg-slate-900\/80,
+  .bg-slate-900\/40,
+  .bg-slate-950\/60 {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: 1px solid #cccccc !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  
+  h1, h2, h3, h4, th, td, span, p, div, label, strong {
+    color: #000000 !important;
+    text-shadow: none !important;
+  }
+  
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  
+  th, td {
+    border-bottom: 1px solid #cccccc !important;
+    padding: 6px 4px !important;
+    color: #000000 !important;
+  }
+  
+  .print-break-after {
+    page-break-after: always;
+  }
+}
+
+/* Ambient Cyber Grid */
+.cyber-grid {
+  background-image: 
+    linear-gradient(rgba(30, 41, 59, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.15) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Tech Scanline Overlay effect */
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 99999;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+/* High Contrast Ambient Shadow */
+.neon-shadow-pink {
+  box-shadow: 0 0 15px -3px rgba(236, 72, 153, 0.3);
+}
+
+.neon-shadow-orange {
+  box-shadow: 0 0 15px -3px rgba(249, 115, 22, 0.3);
+}
+
+.neon-shadow-green {
+  box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.3);
+}
+
+/* Glow Borders */
+.glow-border-pink {
+  border-color: rgba(236, 72, 153, 0.4);
+}
+
+.glow-border-pink:focus {
+  border-color: rgba(236, 72, 153, 0.85);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.3);
+}
+
+.glow-border-orange {
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+.glow-border-orange:focus {
+  border-color: rgba(249, 115, 22, 0.85);
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.3);
+}
+
+/* Orbit Animations for Atom Bubble */
+@keyframes spin-orbit-1 {
+  from { transform: rotate(30deg); }
+  to { transform: rotate(390deg); }
+}
+@keyframes spin-orbit-2 {
+  from { transform: rotate(90deg); }
+  to { transform: rotate(450deg); }
+}
+@keyframes spin-orbit-3 {
+  from { transform: rotate(150deg); }
+  to { transform: rotate(510deg); }
+}
+.animate-orbit-1 {
+  transform-origin: 50px 50px;
+  animation: spin-orbit-1 6s linear infinite;
+}
+.animate-orbit-2 {
+  transform-origin: 50px 50px;
+  animation: spin-orbit-2 9s linear infinite;
+}
+.animate-orbit-3 {
+  transform-origin: 50px 50px;
+  animation: spin-orbit-3 12s linear infinite;
+}
+
+/* Custom Scrollbar for Chat Box */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

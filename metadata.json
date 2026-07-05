@@ -1,0 +1,6 @@
+{
+  "name": "Facturación Rosa Pero No Tan Fucsia",
+  "description": "Sistema de facturación, inventario en tiempo real, caja y cartera con estética retro-cyberpunk Rosa Pero No Tan Fucsia.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
