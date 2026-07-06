@@ -122,6 +122,7 @@ export default function Configuraciones({
       configuraciones: isAdmin,
       solicitudes_clientes: true,
       historial_facturas: true,
+      nomina: isAdmin,
       crear_factura: true,
       editar_cliente: true,
       eliminar_cliente: isAdmin,

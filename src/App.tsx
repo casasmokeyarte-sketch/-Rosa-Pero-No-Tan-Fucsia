@@ -204,24 +204,6 @@ export default function App() {
     type: 'success' | 'error' | 'warning' | 'info';
   }
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
-    const id = `toast-${Date.now()}-${Math.random()}`;
-    setToasts(prev => [...prev, { id, message, type }]);
-    
-    // Play notification sound
-    if (currentClient) {
-      const tone = currentClient.notifSoundTone || 'Predeterminado';
-      playTone(tone as any);
-    } else {
-      if (soundSettings.soundEnabled && soundSettings.notifSoundEnabled) {
-        playTone(soundSettings.defaultTone as any);
-      }
-    }
-
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
-  };
 
   // Shared Chat Support System State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
@@ -253,15 +235,100 @@ export default function App() {
     ];
   });
 
-  useEffect(() => {
-    localStorage.setItem('extreme_chat_messages', JSON.stringify(chatMessages));
-  }, [chatMessages]);
-
   // Client Requests / Complaints State
   const [clientRequests, setClientRequests] = useState<ClientRequest[]>(() => {
     const saved = localStorage.getItem('extreme_client_requests');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // Discounts state
+  const [discounts, setDiscounts] = useState<Discount[]>(() => {
+    const s = localStorage.getItem('extreme_discounts'); return s ? JSON.parse(s) : [];
+  });
+
+  // Flash Messages state
+  const [flashMessages, setFlashMessages] = useState<FlashMessage[]>(() => {
+    const s = localStorage.getItem('extreme_flash_messages'); return s ? JSON.parse(s) : [];
+  });
+
+  // Flash views tracking { flashId: { viewerId: count } }
+  const [flashViews, setFlashViews] = useState<Record<string, Record<string, number>>>(() => {
+    const s = localStorage.getItem('extreme_flash_views'); return s ? JSON.parse(s) : {};
+  });
+
+  // Sound Settings state
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => {
+    const s = localStorage.getItem('extreme_sound_settings');
+    return s ? JSON.parse(s) : { soundEnabled: true, chatSoundEnabled: true, notifSoundEnabled: true, defaultTone: 'Predeterminado' };
+  });
+
+  // Payroll state
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>(() => {
+    const s = localStorage.getItem('extreme_payroll'); return s ? JSON.parse(s) : [];
+  });
+
+  // Operator flash modal
+  const [operatorFlash, setOperatorFlash] = useState<FlashMessage | null>(null);
+
+  // Fullscreen & User authentication states
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    const saved = localStorage.getItem('extreme_is_authenticated');
+    return saved === 'true';
+  });
+
+  // Client Session & Dual-login states
+  const [currentClient, setCurrentClient] = useState<Client | null>(() => {
+    const saved = localStorage.getItem('extreme_current_client');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [loginMode, setLoginMode] = useState<'agent' | 'client'>('client');
+  const [selectedClientLoginId, setSelectedClientLoginId] = useState<string>('');
+  const [showForgotPasswordForm, setShowForgotPasswordForm] = useState<boolean>(false);
+
+  // Forgot password form states
+  const [forgotRut, setForgotRut] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [showForgotNewPwd, setShowForgotNewPwd] = useState(false);
+  const [forgotSuccess, setForgotSuccess] = useState(false);
+
+  // Login panel form states
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Client manual login fields instead of dropdown list
+  const [clientLoginRut, setClientLoginRut] = useState('');
+  const [clientLoginPassword, setClientLoginPassword] = useState('');
+  
+  // Show/Hide password toggles
+  const [showClientPassword, setShowClientPassword] = useState(false);
+  const [showAgentPassword, setShowAgentPassword] = useState(false);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts(prev => [...prev, { id, message, type }]);
+    
+    // Play notification sound
+    if (currentClient) {
+      const tone = currentClient.notifSoundTone || 'Predeterminado';
+      playTone(tone as any);
+    } else {
+      if (soundSettings.soundEnabled && soundSettings.notifSoundEnabled) {
+        playTone(soundSettings.defaultTone as any);
+      }
+    }
+
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
+
+  useEffect(() => {
+    localStorage.setItem('extreme_chat_messages', JSON.stringify(chatMessages));
+  }, [chatMessages]);
 
   useEffect(() => {
     localStorage.setItem('extreme_client_requests', JSON.stringify(clientRequests));
@@ -275,23 +342,12 @@ export default function App() {
     setClientRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
   };
 
-  // Discounts state
-  const [discounts, setDiscounts] = useState<Discount[]>(() => {
-    const s = localStorage.getItem('extreme_discounts'); return s ? JSON.parse(s) : [];
-  });
   useEffect(() => { localStorage.setItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
 
-  // Flash Messages state
-  const [flashMessages, setFlashMessages] = useState<FlashMessage[]>(() => {
-    const s = localStorage.getItem('extreme_flash_messages'); return s ? JSON.parse(s) : [];
-  });
   useEffect(() => { localStorage.setItem('extreme_flash_messages', JSON.stringify(flashMessages)); }, [flashMessages]);
 
-  // Flash views tracking { flashId: { viewerId: count } }
-  const [flashViews, setFlashViews] = useState<Record<string, Record<string, number>>>(() => {
-    const s = localStorage.getItem('extreme_flash_views'); return s ? JSON.parse(s) : {};
-  });
   useEffect(() => { localStorage.setItem('extreme_flash_views', JSON.stringify(flashViews)); }, [flashViews]);
+
   const incrementFlashView = (flashId: string, viewerId: string) => {
     setFlashViews(prev => ({
       ...prev,
@@ -299,17 +355,8 @@ export default function App() {
     }));
   };
 
-  // Sound Settings state
-  const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => {
-    const s = localStorage.getItem('extreme_sound_settings');
-    return s ? JSON.parse(s) : { soundEnabled: true, chatSoundEnabled: true, notifSoundEnabled: true, defaultTone: 'Predeterminado' };
-  });
   useEffect(() => { localStorage.setItem('extreme_sound_settings', JSON.stringify(soundSettings)); }, [soundSettings]);
 
-  // Payroll state
-  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>(() => {
-    const s = localStorage.getItem('extreme_payroll'); return s ? JSON.parse(s) : [];
-  });
   useEffect(() => { localStorage.setItem('extreme_payroll', JSON.stringify(payrollEntries)); }, [payrollEntries]);
 
   // Payroll CRUD Handlers
@@ -370,9 +417,6 @@ export default function App() {
     }
   }, [isAuthenticated, currentUser?.id, flashMessages]);
 
-  // Operator flash modal
-  const [operatorFlash, setOperatorFlash] = useState<FlashMessage | null>(null);
-
   const handleSendMessage = (
     clientId: string, 
     text: string, 
@@ -411,13 +455,6 @@ export default function App() {
     showToast("Auditoría: Purgado de chat deshabilitado por seguridad de la base de datos.", "warning");
   };
 
-  // Fullscreen & User authentication states
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const saved = localStorage.getItem('extreme_is_authenticated');
-    return saved === 'true';
-  });
-
   // Keep track of actual fullscreen element status
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -432,12 +469,6 @@ export default function App() {
     localStorage.setItem('extreme_is_authenticated', String(isAuthenticated));
   }, [isAuthenticated]);
 
-  // Client Session & Dual-login states
-  const [currentClient, setCurrentClient] = useState<Client | null>(() => {
-    const saved = localStorage.getItem('extreme_current_client');
-    return saved ? JSON.parse(saved) : null;
-  });
-
   useEffect(() => {
     if (currentClient) {
       localStorage.setItem('extreme_current_client', JSON.stringify(currentClient));
@@ -445,30 +476,6 @@ export default function App() {
       localStorage.removeItem('extreme_current_client');
     }
   }, [currentClient]);
-
-  const [loginMode, setLoginMode] = useState<'agent' | 'client'>('client');
-  const [selectedClientLoginId, setSelectedClientLoginId] = useState<string>('');
-  const [showForgotPasswordForm, setShowForgotPasswordForm] = useState<boolean>(false);
-
-  // Forgot password form states
-  const [forgotRut, setForgotRut] = useState('');
-  const [forgotNewPassword, setForgotNewPassword] = useState('');
-  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
-  const [showForgotNewPwd, setShowForgotNewPwd] = useState(false);
-  const [forgotSuccess, setForgotSuccess] = useState(false);
-
-  // Login panel form states
-  const [loginUsername, setLoginUsername] = useState('admin');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginError, setLoginError] = useState<string | null>(null);
-
-  // Client manual login fields instead of dropdown list
-  const [clientLoginRut, setClientLoginRut] = useState('');
-  const [clientLoginPassword, setClientLoginPassword] = useState('');
-  
-  // Show/Hide password toggles
-  const [showClientPassword, setShowClientPassword] = useState(false);
-  const [showAgentPassword, setShowAgentPassword] = useState(false);
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
