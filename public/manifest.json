@@ -1,0 +1,24 @@
+{
+  "name": "Rosa Fuerte Pero NO Tan Fucsia",
+  "short_name": "Rosa Fuerte",
+  "description": "Sistema de Facturación y Despacho Extreme Courier",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0e15",
+  "theme_color": "#ff007f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
