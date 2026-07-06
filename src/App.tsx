@@ -141,6 +141,17 @@ export default function App() {
   });
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
+    const saved = localStorage.getItem('extreme_current_user');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && parsed.id) {
+          return parsed;
+        }
+      } catch (e) {
+        // Fallback
+      }
+    }
     return INITIAL_USERS[1]; // "Agente Neon-Pink" as default session user
   });
 
@@ -476,6 +487,14 @@ export default function App() {
       localStorage.removeItem('extreme_current_client');
     }
   }, [currentClient]);
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('extreme_current_user', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('extreme_current_user');
+    }
+  }, [currentUser]);
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1513,7 +1532,10 @@ export default function App() {
 
           {/* Security Lock / Logout Button */}
           <button 
-            onClick={() => setIsAuthenticated(false)}
+            onClick={() => {
+              setIsAuthenticated(false);
+              setCurrentUser(INITIAL_USERS[1]);
+            }}
             className="flex items-center justify-center bg-slate-900 text-gray-400 hover:text-red-400 p-2 rounded-lg border border-cyber-border hover:border-red-500/50 cursor-pointer transition-all"
             title="Cerrar Sesión / Bloquear Terminal"
           >
