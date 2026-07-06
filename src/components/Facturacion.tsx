@@ -79,6 +79,25 @@ export default function Facturacion({
   // Form errors
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Delivery / Domicilios states
+  const [isDelivery, setIsDelivery] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState<number>(0);
+  const [deliveryRider, setDeliveryRider] = useState('');
+  const [deliveryTransport, setDeliveryTransport] = useState('Motocicleta');
+  const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
+
+  // Shipping Guide Editable fields
+  const [guideName, setGuideName] = useState('');
+  const [guideRut, setGuideRut] = useState('');
+  const [guidePhone, setGuidePhone] = useState('');
+  const [guideAddress, setGuideAddress] = useState('');
+  const [guideNotes, setGuideNotes] = useState('Suministros logísticos Rosa Fuerte');
+
+  // Client Digital Signature states & handlers
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
   // Filter valid promotions based on current date, time, day, and billing context
   const getActivePromotions = () => {
     const now = new Date();
@@ -127,20 +146,6 @@ export default function Facturacion({
     }
   };
 
-  // Delivery / Domicilios states
-  const [isDelivery, setIsDelivery] = useState(false);
-  const [deliveryFee, setDeliveryFee] = useState<number>(0);
-  const [deliveryRider, setDeliveryRider] = useState('');
-  const [deliveryTransport, setDeliveryTransport] = useState('Motocicleta');
-  const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
-
-  // Shipping Guide Editable fields
-  const [guideName, setGuideName] = useState('');
-  const [guideRut, setGuideRut] = useState('');
-  const [guidePhone, setGuidePhone] = useState('');
-  const [guideAddress, setGuideAddress] = useState('');
-  const [guideNotes, setGuideNotes] = useState('Suministros logísticos Rosa Fuerte');
-
   // Prefill guide fields when client is selected
   useEffect(() => {
     if (selectedClient) {
@@ -171,11 +176,6 @@ export default function Facturacion({
       }
     }
   }, [deliveryMethod, isDelivery]);
-
-  // Client Digital Signature states & handlers
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
-  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
 
   // Initialize canvas or clear it when isDelivery state changes
   useEffect(() => {
