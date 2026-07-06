@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig } from '../types';
+import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount } from '../types';
 import CyberEmpty from './CyberEmpty';
 import { 
   ShoppingCart, 
@@ -28,6 +28,7 @@ interface FacturacionProps {
   currentUser: any;
   onAddInvoice: (invoice: Invoice) => void;
   onAddClient: (client: Client) => void;
+  discounts: Discount[];
 }
 
 export default function Facturacion({
@@ -38,7 +39,8 @@ export default function Facturacion({
   config,
   currentUser,
   onAddInvoice,
-  onAddClient
+  onAddClient,
+  discounts = []
 }: FacturacionProps) {
   // Check if there is an active shift
   const activeShift = shifts.find(s => s.status === 'Abierta');
@@ -76,6 +78,54 @@ export default function Facturacion({
 
   // Form errors
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Filter valid promotions based on current date, time, day, and billing context
+  const getActivePromotions = () => {
+    const now = new Date();
+    const day = now.getDay();
+    // Time formatted as HH:MM
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const targetModule = isDelivery ? 'domicilios' : 'facturacion';
+
+    return discounts.filter(d => {
+      if (!d.active) return false;
+      if (d.appliesTo !== 'todos' && d.appliesTo !== targetModule) return false;
+      
+      if (d.startDate) {
+        const start = new Date(d.startDate);
+        if (now < start) return false;
+      }
+      if (d.endDate) {
+        const end = new Date(d.endDate + 'T23:59:59');
+        if (now > end) return false;
+      }
+
+      if (d.startTime && timeStr < d.startTime) return false;
+      if (d.endTime && timeStr > d.endTime) return false;
+
+      if (d.activeDays && d.activeDays.length > 0 && !d.activeDays.includes(day)) return false;
+
+      return true;
+    });
+  };
+
+  const activePromos = getActivePromotions();
+
+  const handleSelectPromo = (promoId: string) => {
+    if (!promoId) {
+      setDiscount(0);
+      return;
+    }
+    const promo = activePromos.find(p => p.id === promoId);
+    if (!promo) return;
+
+    if (promo.type === 'porcentaje') {
+      const calculated = parseFloat((subtotal * (promo.value / 100)).toFixed(2));
+      setDiscount(calculated);
+    } else {
+      setDiscount(Math.min(subtotal, promo.value));
+    }
+  };
 
   // Delivery / Domicilios states
   const [isDelivery, setIsDelivery] = useState(false);
@@ -935,6 +985,23 @@ export default function Facturacion({
                 <span className="absolute right-2.5 top-2 text-[10px] text-gray-500">$</span>
               </div>
             </div>
+
+            {activePromos.length > 0 && (
+              <div className="space-y-1 pt-1.5">
+                <label className="block text-[9px] text-gray-500 uppercase tracking-wider">Aplicar Promoción Activa:</label>
+                <select 
+                  onChange={e => handleSelectPromo(e.target.value)}
+                  className="bg-cyber-bg border border-cyber-border text-white text-[11px] p-2 rounded-lg w-full focus:outline-none font-mono"
+                >
+                  <option value="">-- Seleccionar Promoción --</option>
+                  {activePromos.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.type === 'porcentaje' ? `${p.value}%` : `$${p.value} USD`})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="flex justify-between text-sm font-bold text-white pt-3 border-t border-slate-800">
               <span>Total a Liquidar:</span>

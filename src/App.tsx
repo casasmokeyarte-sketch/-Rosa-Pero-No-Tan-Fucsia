@@ -12,7 +12,11 @@ import {
   ChatMessage,
   ChatAttachment,
   StockTransfer,
-  ClientRequest
+  ClientRequest,
+  Discount,
+  FlashMessage,
+  SoundSettings,
+  PayrollEntry
 } from './types';
 import { 
   INITIAL_BUSINESS_CONFIG, 
@@ -41,7 +45,9 @@ import IdentificadorTlf from './components/IdentificadorTlf';
 import ChatSoporte from './components/ChatSoporte';
 import SolicitudesClientes from './components/SolicitudesClientes';
 import HistorialFacturas from './components/HistorialFacturas';
+import Nomina from './components/Nomina';
 import RestrictedAccess from './components/RestrictedAccess';
+import { playTone } from './utils/soundService';
 import AtomBubble from './components/AtomBubble';
 
 // Icons
@@ -69,7 +75,8 @@ import {
   MapPin,
   Phone,
   MessageSquare,
-  Inbox
+  Inbox,
+  DollarSign
 } from 'lucide-react';
 
 export function getUserPermissions(user: User): UserPermissions {
@@ -92,6 +99,7 @@ export function getUserPermissions(user: User): UserPermissions {
     configuraciones: isDocAdmin,
     solicitudes_clientes: true,
     historial_facturas: true,
+    nomina: isDocAdmin,
 
     crear_factura: true,
     editar_cliente: true,
@@ -199,6 +207,17 @@ export default function App() {
   const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev, { id, message, type }]);
+    
+    // Play notification sound
+    if (currentClient) {
+      const tone = currentClient.notifSoundTone || 'Predeterminado';
+      playTone(tone as any);
+    } else {
+      if (soundSettings.soundEnabled && soundSettings.notifSoundEnabled) {
+        playTone(soundSettings.defaultTone as any);
+      }
+    }
+
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
@@ -255,6 +274,104 @@ export default function App() {
   const handleUpdateClientRequest = (updated: ClientRequest) => {
     setClientRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
   };
+
+  // Discounts state
+  const [discounts, setDiscounts] = useState<Discount[]>(() => {
+    const s = localStorage.getItem('extreme_discounts'); return s ? JSON.parse(s) : [];
+  });
+  useEffect(() => { localStorage.setItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
+
+  // Flash Messages state
+  const [flashMessages, setFlashMessages] = useState<FlashMessage[]>(() => {
+    const s = localStorage.getItem('extreme_flash_messages'); return s ? JSON.parse(s) : [];
+  });
+  useEffect(() => { localStorage.setItem('extreme_flash_messages', JSON.stringify(flashMessages)); }, [flashMessages]);
+
+  // Flash views tracking { flashId: { viewerId: count } }
+  const [flashViews, setFlashViews] = useState<Record<string, Record<string, number>>>(() => {
+    const s = localStorage.getItem('extreme_flash_views'); return s ? JSON.parse(s) : {};
+  });
+  useEffect(() => { localStorage.setItem('extreme_flash_views', JSON.stringify(flashViews)); }, [flashViews]);
+  const incrementFlashView = (flashId: string, viewerId: string) => {
+    setFlashViews(prev => ({
+      ...prev,
+      [flashId]: { ...(prev[flashId] || {}), [viewerId]: ((prev[flashId]?.[viewerId]) || 0) + 1 }
+    }));
+  };
+
+  // Sound Settings state
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => {
+    const s = localStorage.getItem('extreme_sound_settings');
+    return s ? JSON.parse(s) : { soundEnabled: true, chatSoundEnabled: true, notifSoundEnabled: true, defaultTone: 'Predeterminado' };
+  });
+  useEffect(() => { localStorage.setItem('extreme_sound_settings', JSON.stringify(soundSettings)); }, [soundSettings]);
+
+  // Payroll state
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>(() => {
+    const s = localStorage.getItem('extreme_payroll'); return s ? JSON.parse(s) : [];
+  });
+  useEffect(() => { localStorage.setItem('extreme_payroll', JSON.stringify(payrollEntries)); }, [payrollEntries]);
+
+  // Payroll CRUD Handlers
+  const handleAddPayrollEntry = (entry: PayrollEntry) => {
+    setPayrollEntries(prev => [...prev, entry]);
+    showToast(`Recibo de nómina para ${entry.userName} generado con éxito`, "success");
+  };
+
+  const handleUpdatePayrollEntry = (entry: PayrollEntry) => {
+    setPayrollEntries(prev => prev.map(p => p.id === entry.id ? entry : p));
+    showToast(`Recibo de nómina para ${entry.userName} actualizado con éxito`, "success");
+  };
+
+  const handleDeletePayrollEntry = (id: string) => {
+    setPayrollEntries(prev => prev.filter(p => p.id !== id));
+    showToast("Recibo de nómina eliminado", "warning");
+  };
+
+  // Play sounds for chat messages
+  useEffect(() => {
+    if (chatMessages.length === 0) return;
+    const lastMsg = chatMessages[chatMessages.length - 1];
+    
+    // Check if the message is fresh (sent in the last 4 seconds)
+    const msgTime = new Date(lastMsg.timestamp).getTime();
+    if (Date.now() - msgTime > 4000) return;
+
+    if (lastMsg.sender === 'client') {
+      // Incoming message for operators
+      if (soundSettings.soundEnabled && soundSettings.chatSoundEnabled) {
+        playTone(soundSettings.defaultTone as any);
+      }
+    } else if (lastMsg.sender === 'agent' && currentClient) {
+      // Incoming message for client
+      const tone = currentClient.chatSoundTone || 'Predeterminado';
+      playTone(tone as any);
+    }
+  }, [chatMessages, currentClient, soundSettings]);
+
+  // Flash Message Popup trigger for Operators
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+    
+    const activeFlashes = flashMessages.filter(f => 
+      f.active && 
+      (f.target === 'operadores' || f.target === 'ambos') &&
+      (!f.expiresAt || new Date(f.expiresAt) > new Date())
+    );
+
+    const flashToShow = activeFlashes.find(f => {
+      const views = (flashViews[f.id]?.[currentUser.username]) || 0;
+      return views < f.maxViews;
+    });
+
+    if (flashToShow) {
+      setOperatorFlash(flashToShow);
+      incrementFlashView(flashToShow.id, currentUser.username);
+    }
+  }, [isAuthenticated, currentUser?.id, flashMessages]);
+
+  // Operator flash modal
+  const [operatorFlash, setOperatorFlash] = useState<FlashMessage | null>(null);
 
   const handleSendMessage = (
     clientId: string, 
@@ -1011,6 +1128,7 @@ export default function App() {
     { id: 'identificadortlf', label: 'Identificador Telefónico', icon: Phone, color: 'text-cyber-blue' },
     { id: 'chatsoporte', label: 'Soporte Chat', icon: MessageSquare, color: 'text-cyber-pink' },
     { id: 'solicitudes_clientes', label: 'Solicitudes Clientes', icon: Inbox, color: 'text-cyber-orange' },
+    { id: 'nomina', label: 'Nómina', icon: DollarSign, color: 'text-cyber-green' },
     { id: 'configuraciones', label: 'Configuraciones', icon: Settings, color: 'text-cyber-blue' }
   ];
 
@@ -1030,6 +1148,10 @@ export default function App() {
         clientRequests={clientRequests.filter(r => r.clientId === currentClient.id)}
         onSubmitRequest={handleAddClientRequest}
         onDeleteClient={handleDeleteClient}
+        flashMessages={flashMessages}
+        flashViews={flashViews}
+        onIncrementFlashView={incrementFlashView}
+        onUpdateClient={handleUpdateClient}
       />
     );
   }
@@ -1528,6 +1650,7 @@ export default function App() {
               currentUser={currentUser}
               onAddInvoice={handleAddInvoice}
               onAddClient={handleAddClient}
+              discounts={discounts}
             />
           )}
 
@@ -1623,6 +1746,12 @@ export default function App() {
               onDeleteUser={handleDeleteUser}
               onResetDatabase={handleResetDatabase}
               onImportDatabase={handleImportDatabase}
+              discounts={discounts}
+              onUpdateDiscounts={setDiscounts}
+              flashMessages={flashMessages}
+              onUpdateFlashMessages={setFlashMessages}
+              soundSettings={soundSettings}
+              onUpdateSoundSettings={setSoundSettings}
             />
           )}
 
@@ -1669,6 +1798,18 @@ export default function App() {
               }}
             />
           )}
+
+          {activeTab === 'nomina' && getUserPermissions(currentUser).nomina !== false && (
+            <Nomina 
+              users={users}
+              payrollEntries={payrollEntries}
+              config={config}
+              currentUserName={currentUser.fullName}
+              onAddEntry={handleAddPayrollEntry}
+              onUpdateEntry={handleUpdatePayrollEntry}
+              onDeleteEntry={handleDeletePayrollEntry}
+            />
+          )}
         </main>
 
       </div>
@@ -1712,6 +1853,74 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      {/* Operator Flash Message Modal */}
+      {operatorFlash && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-cyber-card border-2 border-cyber-pink/80 rounded-2xl max-w-lg w-full p-6 space-y-4 relative shadow-[0_0_40px_rgba(236,72,153,0.3)] font-mono text-xs select-text">
+            {/* Pulsing neon title */}
+            <div className="border-b border-cyber-border pb-3 flex justify-between items-center">
+              <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2 animate-pulse">
+                📢 PUBLICIDAD / RECORDATORIO DE COMUNICACIÓN
+              </h2>
+              <button 
+                onClick={() => setOperatorFlash(null)} 
+                className="text-gray-500 hover:text-white transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <h3 className="text-cyber-pink font-bold text-sm tracking-wide uppercase">
+                {operatorFlash.title}
+              </h3>
+              <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+                {operatorFlash.content}
+              </p>
+              
+              {/* Media attachment representation */}
+              {operatorFlash.attachmentUrl && (
+                <div className="pt-2 border-t border-slate-900 flex justify-center">
+                  {operatorFlash.attachmentType === 'image' && (
+                    <img 
+                      src={operatorFlash.attachmentUrl} 
+                      alt={operatorFlash.attachmentName || 'Adjunto'} 
+                      className="max-w-full rounded-lg border border-cyber-border max-h-60 object-contain shadow-lg"
+                    />
+                  )}
+                  {operatorFlash.attachmentType === 'video' && (
+                    <video 
+                      src={operatorFlash.attachmentUrl} 
+                      controls 
+                      className="max-w-full rounded-lg border border-cyber-border max-h-60 shadow-lg"
+                    />
+                  )}
+                  {operatorFlash.attachmentType === 'file' && (
+                    <a 
+                      href={operatorFlash.attachmentUrl} 
+                      download={operatorFlash.attachmentName || 'archivo'}
+                      className="flex items-center gap-2.5 p-3 bg-slate-950/80 hover:bg-slate-900 border border-slate-900 hover:border-cyber-pink rounded-xl text-white hover:text-cyber-pink transition-all w-full truncate"
+                    >
+                      <span>📎</span>
+                      <span className="truncate">{operatorFlash.attachmentName || 'Descargar archivo adjunto'}</span>
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-900 flex justify-end">
+              <button
+                onClick={() => setOperatorFlash(null)}
+                className="bg-cyber-pink text-black hover:bg-cyber-accent px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer shadow-lg active:scale-95 transition-all text-center neon-shadow-pink"
+              >
+                ENTENDIDO Y CERRAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

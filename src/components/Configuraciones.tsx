@@ -1,5 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { BusinessConfig, User, UserPermissions, Client, Product, Invoice, Shift, Expense, StockAdjustment } from '../types';
+import { 
+  BusinessConfig, User, UserPermissions, Client, Product, Invoice, Shift, Expense, StockAdjustment,
+  Discount, FlashMessage, SoundSettings 
+} from '../types';
+import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
   Settings, 
   Building, 
@@ -50,6 +54,12 @@ interface ConfiguracionesProps {
     expenses: Expense[];
     adjustments: StockAdjustment[];
   }) => void;
+  discounts: Discount[];
+  onUpdateDiscounts: (discounts: Discount[]) => void;
+  flashMessages: FlashMessage[];
+  onUpdateFlashMessages: (messages: FlashMessage[]) => void;
+  soundSettings: SoundSettings;
+  onUpdateSoundSettings: (settings: SoundSettings) => void;
 }
 
 export default function Configuraciones({
@@ -67,7 +77,13 @@ export default function Configuraciones({
   onUpdateUser,
   onDeleteUser,
   onResetDatabase,
-  onImportDatabase
+  onImportDatabase,
+  discounts,
+  onUpdateDiscounts,
+  flashMessages,
+  onUpdateFlashMessages,
+  soundSettings,
+  onUpdateSoundSettings
 }: ConfiguracionesProps) {
   
   // Local state for configuration form
@@ -172,6 +188,157 @@ export default function Configuraciones({
   const [backupError, setBackupError] = useState<string | null>(null);
   const [backupSuccess, setBackupSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Local Sound settings state
+  const [soundEnabled, setSoundEnabled] = useState(soundSettings.soundEnabled);
+  const [chatSoundEnabled, setChatSoundEnabled] = useState(soundSettings.chatSoundEnabled);
+  const [notifSoundEnabled, setNotifSoundEnabled] = useState(soundSettings.notifSoundEnabled);
+  const [defaultTone, setDefaultTone] = useState(soundSettings.defaultTone);
+  const [soundSaveSuccess, setSoundSaveSuccess] = useState(false);
+
+  // Promotions and Discounts Form state
+  const [promoName, setPromoName] = useState('');
+  const [promoType, setPromoType] = useState<'porcentaje' | 'fijo'>('porcentaje');
+  const [promoValue, setPromoValue] = useState(0);
+  const [promoStartDate, setPromoStartDate] = useState('');
+  const [promoEndDate, setPromoEndDate] = useState('');
+  const [promoStartTime, setPromoStartTime] = useState('');
+  const [promoEndTime, setPromoEndTime] = useState('');
+  const [promoActiveDays, setPromoActiveDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]); // All days
+  const [promoAppliesTo, setPromoAppliesTo] = useState<'todos' | 'facturacion' | 'domicilios'>('todos');
+  const [promoActive, setPromoActive] = useState(true);
+
+  // Flash Reminders Form state
+  const [flashTitle, setFlashTitle] = useState('');
+  const [flashContent, setFlashContent] = useState('');
+  const [flashTarget, setFlashTarget] = useState<'operadores' | 'clientes' | 'ambos'>('ambos');
+  const [flashMaxViews, setFlashMaxViews] = useState(1);
+  const [flashExpiresAt, setFlashExpiresAt] = useState('');
+  const [flashAttachmentUrl, setFlashAttachmentUrl] = useState<string>('');
+  const [flashAttachmentType, setFlashAttachmentType] = useState<'image' | 'video' | 'file' | undefined>(undefined);
+  const [flashAttachmentName, setFlashAttachmentName] = useState('');
+  const [flashActive, setFlashActive] = useState(true);
+  const flashFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sound submit
+  const handleSoundSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateSoundSettings({
+      soundEnabled,
+      chatSoundEnabled,
+      notifSoundEnabled,
+      defaultTone
+    });
+    setSoundSaveSuccess(true);
+    setTimeout(() => setSoundSaveSuccess(false), 3000);
+  };
+
+  // Promotions CRUD Handlers
+  const handleAddDiscountSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promoName || promoValue <= 0) return;
+    
+    const newPromo: Discount = {
+      id: `promo-${Date.now()}`,
+      name: promoName,
+      type: promoType,
+      value: promoValue,
+      active: promoActive,
+      startDate: promoStartDate || undefined,
+      endDate: promoEndDate || undefined,
+      startTime: promoStartTime || undefined,
+      endTime: promoEndTime || undefined,
+      activeDays: promoActiveDays,
+      appliesTo: promoAppliesTo,
+      createdAt: new Date().toISOString()
+    };
+    onUpdateDiscounts([...discounts, newPromo]);
+    
+    // Reset Form
+    setPromoName('');
+    setPromoValue(0);
+    setPromoStartDate('');
+    setPromoEndDate('');
+    setPromoStartTime('');
+    setPromoEndTime('');
+    setPromoActiveDays([1, 2, 3, 4, 5, 6, 0]);
+    setPromoAppliesTo('todos');
+    setPromoActive(true);
+  };
+
+  const handleDeleteDiscount = (id: string) => {
+    onUpdateDiscounts(discounts.filter(d => d.id !== id));
+  };
+
+  const handleToggleDiscountActive = (id: string) => {
+    onUpdateDiscounts(discounts.map(d => d.id === id ? { ...d, active: !d.active } : d));
+  };
+
+  const handleFlashFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    let type: 'image' | 'video' | 'file' = 'file';
+    if (file.type.startsWith('image/')) type = 'image';
+    else if (file.type.startsWith('video/')) type = 'video';
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFlashAttachmentUrl(event.target?.result as string);
+      setFlashAttachmentType(type);
+      setFlashAttachmentName(file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddFlashSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!flashTitle || !flashContent) return;
+
+    const newFlash: FlashMessage = {
+      id: `flash-${Date.now()}`,
+      title: flashTitle,
+      content: flashContent,
+      target: flashTarget,
+      maxViews: flashMaxViews,
+      expiresAt: flashExpiresAt || undefined,
+      attachmentUrl: flashAttachmentUrl || undefined,
+      attachmentType: flashAttachmentType,
+      attachmentName: flashAttachmentName || undefined,
+      active: flashActive,
+      createdAt: new Date().toISOString()
+    };
+
+    onUpdateFlashMessages([...flashMessages, newFlash]);
+
+    // Reset Form
+    setFlashTitle('');
+    setFlashContent('');
+    setFlashTarget('ambos');
+    setFlashMaxViews(1);
+    setFlashExpiresAt('');
+    setFlashAttachmentUrl('');
+    setFlashAttachmentType(undefined);
+    setFlashAttachmentName('');
+    setFlashActive(true);
+    if (flashFileInputRef.current) flashFileInputRef.current.value = '';
+  };
+
+  const handleDeleteFlash = (id: string) => {
+    onUpdateFlashMessages(flashMessages.filter(f => f.id !== id));
+  };
+
+  const handleToggleFlashActive = (id: string) => {
+    onUpdateFlashMessages(flashMessages.map(f => f.id === id ? { ...f, active: !f.active } : f));
+  };
+
+  const handlePromoDayToggle = (day: number) => {
+    if (promoActiveDays.includes(day)) {
+      setPromoActiveDays(promoActiveDays.filter(d => d !== day));
+    } else {
+      setPromoActiveDays([...promoActiveDays, day]);
+    }
+  };
 
   // Submit config update
   const handleConfigSubmit = (e: React.FormEvent) => {
@@ -516,6 +683,106 @@ export default function Configuraciones({
             </form>
           </div>
 
+          {/* CONFIGURACIÓN DE ALERTAS DE SONIDO */}
+          <div className="bg-cyber-card border border-cyber-border rounded-xl p-5">
+            <h2 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5 border-b border-cyber-border pb-3 mb-4">
+              <span className="text-cyber-orange">🔊</span>
+              CONFIGURACIÓN DE CANAL DE AUDIO Y ALERTAS
+            </h2>
+
+            <form onSubmit={handleSoundSubmit} className="space-y-4 text-xs font-mono">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                <div className="flex items-center justify-between p-2.5 rounded bg-slate-900 border border-slate-800">
+                  <div>
+                    <p className="font-bold text-gray-200">Sonido de Sistema Habilitado</p>
+                    <p className="text-[9px] text-gray-500">Activa o silencia el audio general</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={soundEnabled} 
+                      onChange={e => setSoundEnabled(e.target.checked)} 
+                      className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-pink"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between p-2.5 rounded bg-slate-900 border border-slate-800">
+                  <div>
+                    <p className="font-bold text-gray-200">Alertas de Chat</p>
+                    <p className="text-[9px] text-gray-500">Sonar al recibir mensajes de chat</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={chatSoundEnabled} 
+                      onChange={e => setChatSoundEnabled(e.target.checked)} 
+                      className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-pink"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between p-2.5 rounded bg-slate-900 border border-slate-800">
+                  <div>
+                    <p className="font-bold text-gray-200">Alertas de Notificación</p>
+                    <p className="text-[9px] text-gray-500">Sonar al emitirse advertencias/avisos</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={notifSoundEnabled} 
+                      onChange={e => setNotifSoundEnabled(e.target.checked)} 
+                      className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-pink"></div>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5 p-2.5 rounded bg-slate-900 border border-slate-800 flex flex-col justify-between">
+                  <label className="text-gray-400 text-[10px] uppercase">Tono Predeterminado de Caja</label>
+                  <div className="flex gap-2">
+                    <select 
+                      value={defaultTone} 
+                      onChange={e => {
+                        setDefaultTone(e.target.value);
+                        playTone(e.target.value as any);
+                      }}
+                      className="flex-1 bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-xs focus:outline-none"
+                    >
+                      {TONE_NAMES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => playTone(defaultTone as any)}
+                      className="bg-cyber-pink/20 hover:bg-cyber-pink/40 border border-cyber-pink/30 text-cyber-pink px-3 py-1 rounded font-bold cursor-pointer transition-all"
+                      title="Probar sonido"
+                    >
+                      🔊
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                {soundSaveSuccess && (
+                  <span className="text-cyber-green text-[11px] flex items-center gap-1">
+                    <Check size={14} /> ¡Configuración de audio guardada!
+                  </span>
+                )}
+                <button
+                  type="submit"
+                  className="ml-auto bg-cyber-orange text-black hover:bg-orange-600 px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer"
+                >
+                  Guardar Audio
+                </button>
+              </div>
+            </form>
+          </div>
+
           {/* CATEGORÍAS DE PRODUCTOS Y MÉTODOS DE PAGO */}
           <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-6">
             <div className="border-b border-cyber-border pb-3">
@@ -732,6 +999,7 @@ export default function Configuraciones({
                         { key: 'chatsoporte', label: 'Chat', desc: 'Portal cliente interactivo' },
                         { key: 'solicitudes_clientes', label: 'Solicitudes', desc: 'Reclamos y sugerencias' },
                         { key: 'historial_facturas', label: 'Hist. Facturas', desc: 'Ver y reimprimir facturas' },
+                        { key: 'nomina', label: 'Nómina', desc: 'Cálculo de salarios y recibos' },
                         { key: 'configuraciones', label: 'Ajustes', desc: 'Parámetros fiscales y sistema' }
                       ].map(item => (
                         <label 
@@ -1092,6 +1360,453 @@ export default function Configuraciones({
 
         </div>
 
+      </div>
+
+      {/* SECCIÓN COMPLETA DE PROMOCIONES Y DESCUENTOS */}
+      <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-6" id="promos-section">
+        <div className="border-b border-cyber-border pb-3 flex justify-between items-center">
+          <h2 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5">
+            <span className="text-cyber-pink">🏷️</span>
+            GESTIÓN DE PROMOCIONES Y DESCUENTOS FIJOS / PROGRAMADOS
+          </h2>
+          <span className="text-[10px] bg-cyber-pink/15 text-cyber-pink px-2.5 py-0.5 rounded-full border border-cyber-pink/20 font-mono">
+            {discounts.length} Promociones
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 text-xs font-mono">
+          {/* Creator Form */}
+          <form onSubmit={handleAddDiscountSubmit} className="xl:col-span-4 space-y-3.5 bg-slate-950/65 p-4 rounded-xl border border-slate-900">
+            <h3 className="text-[10px] text-cyber-orange font-bold uppercase tracking-wider border-b border-slate-900 pb-2">
+              ➕ Crear Nueva Promoción / Descuento
+            </h3>
+            
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Nombre de la Promoción</label>
+              <input 
+                type="text" 
+                value={promoName} 
+                onChange={e => setPromoName(e.target.value)} 
+                placeholder="Ej: Descuento Fijo Rosa Fuerte"
+                className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[10px] uppercase">Tipo</label>
+                <select 
+                  value={promoType} 
+                  onChange={e => setPromoType(e.target.value as any)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+                >
+                  <option value="porcentaje">Porcentaje (%)</option>
+                  <option value="fijo">Monto Fijo ($)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[10px] uppercase">Valor</label>
+                <input 
+                  type="number" 
+                  min={0.01} 
+                  step={0.01} 
+                  value={promoValue} 
+                  onChange={e => setPromoValue(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none text-right font-bold"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Aplica En</label>
+              <select 
+                value={promoAppliesTo} 
+                onChange={e => setPromoAppliesTo(e.target.value as any)}
+                className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+              >
+                <option value="todos">Caja y Domicilios (Todos)</option>
+                <option value="facturacion">Solo Facturación de Caja</option>
+                <option value="domicilios">Solo Entregas a Domicilio</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[9px] uppercase">Fecha Inicio (opcional)</label>
+                <input 
+                  type="date" 
+                  value={promoStartDate} 
+                  onChange={e => setPromoStartDate(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-xs focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[9px] uppercase">Fecha Fin (opcional)</label>
+                <input 
+                  type="date" 
+                  value={promoEndDate} 
+                  onChange={e => setPromoEndDate(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[9px] uppercase">Hora Inicio (opcional)</label>
+                <input 
+                  type="time" 
+                  value={promoStartTime} 
+                  onChange={e => setPromoStartTime(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-xs focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[9px] uppercase">Hora Fin (opcional)</label>
+                <input 
+                  type="time" 
+                  value={promoEndTime} 
+                  onChange={e => setPromoEndTime(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Active Days Checkboxes */}
+            <div className="space-y-1.5">
+              <label className="block text-gray-400 text-[9px] uppercase">Días Activos de la Semana</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: 1, label: 'Lun' },
+                  { value: 2, label: 'Mar' },
+                  { value: 3, label: 'Mié' },
+                  { value: 4, label: 'Jue' },
+                  { value: 5, label: 'Vie' },
+                  { value: 6, label: 'Sáb' },
+                  { value: 0, label: 'Dom' }
+                ].map(day => {
+                  const isChecked = promoActiveDays.includes(day.value);
+                  return (
+                    <button
+                      key={day.value}
+                      type="button"
+                      onClick={() => handlePromoDayToggle(day.value)}
+                      className={`px-2 py-1 rounded text-[10px] font-bold font-mono transition-all ${
+                        isChecked 
+                          ? 'bg-cyber-pink text-black' 
+                          : 'bg-slate-900 border border-slate-800 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1.5">
+              <input 
+                type="checkbox" 
+                id="promo-active-chk"
+                checked={promoActive} 
+                onChange={e => setPromoActive(e.target.checked)}
+                className="rounded border-cyber-border bg-cyber-bg text-cyber-pink"
+              />
+              <label htmlFor="promo-active-chk" className="text-gray-300 font-bold select-none cursor-pointer">Activar inmediatamente</label>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-cyber-pink hover:bg-cyber-accent text-black font-bold py-2.5 rounded-lg font-mono text-xs cursor-pointer text-center neon-shadow-pink"
+            >
+              Registrar Promoción
+            </button>
+          </form>
+
+          {/* List of promotions */}
+          <div className="xl:col-span-8 space-y-3">
+            <h3 className="text-[10px] text-cyber-pink font-bold uppercase tracking-wider border-b border-slate-900 pb-2">
+              Listado de Promociones y Descuentos
+            </h3>
+            
+            <div className="overflow-x-auto rounded-lg border border-slate-900 bg-slate-950/40">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950 border-b border-slate-900 text-[10px] text-gray-400 font-bold">
+                    <th className="p-3">Nombre</th>
+                    <th className="p-3 text-center">Descuento</th>
+                    <th className="p-3">Módulo</th>
+                    <th className="p-3">Vigencia Fechas</th>
+                    <th className="p-3">Días Activos</th>
+                    <th className="p-3 text-center">Estado</th>
+                    <th className="p-3 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-900/60">
+                  {discounts.map(d => (
+                    <tr key={d.id} className="hover:bg-slate-900/20 transition-colors">
+                      <td className="p-3 font-bold text-white">{d.name}</td>
+                      <td className="p-3 text-center font-extrabold text-cyber-green">
+                        {d.type === 'porcentaje' ? `${d.value}%` : `$${d.value.toFixed(2)}`}
+                      </td>
+                      <td className="p-3 capitalize text-gray-400 font-semibold">
+                        {d.appliesTo === 'todos' ? 'Todos' : d.appliesTo === 'facturacion' ? 'POS Caja' : 'Domicilios'}
+                      </td>
+                      <td className="p-3 text-[10px] text-gray-500">
+                        {d.startDate ? `Desde: ${d.startDate}` : 'Siempre'}
+                        {d.endDate ? ` hasta: ${d.endDate}` : ''}
+                        {d.startTime ? ` (${d.startTime} - ${d.endTime || '23:59'})` : ''}
+                      </td>
+                      <td className="p-3 text-[9px] text-gray-400 font-bold">
+                        {d.activeDays.length === 7 ? 'Todos' : d.activeDays.map(dayNum => {
+                          const labels = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+                          return labels[dayNum];
+                        }).join(', ')}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleDiscountActive(d.id)}
+                          className={`px-2 py-0.5 rounded text-[8px] font-bold tracking-widest border transition-all ${
+                            d.active
+                              ? 'bg-green-950/60 border-green-500/30 text-green-400'
+                              : 'bg-red-950/60 border-red-500/30 text-red-400'
+                          }`}
+                        >
+                          {d.active ? 'ACTIVO' : 'INACTIVO'}
+                        </button>
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDiscount(d.id)}
+                          className="text-gray-500 hover:text-red-400 p-1 cursor-pointer"
+                          title="Eliminar Promoción"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {discounts.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-gray-550">
+                        Sin promociones configuradas en la base de datos comercial.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SECCIÓN COMPLETA DE RECORDATORIOS FLASH Y PUBLICIDAD */}
+      <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-6" id="flash-section">
+        <div className="border-b border-cyber-border pb-3 flex justify-between items-center">
+          <h2 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5">
+            <span className="text-cyber-pink">📢</span>
+            CENTRAL DE PUBLICIDAD FLASH Y AVISOS OPERATIVOS
+          </h2>
+          <span className="text-[10px] bg-cyber-pink/15 text-cyber-pink px-2.5 py-0.5 rounded-full border border-cyber-pink/20 font-mono">
+            {flashMessages.length} Anuncios
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 text-xs font-mono">
+          {/* Form */}
+          <form onSubmit={handleAddFlashSubmit} className="xl:col-span-4 space-y-3.5 bg-slate-950/65 p-4 rounded-xl border border-slate-900">
+            <h3 className="text-[10px] text-cyber-orange font-bold uppercase tracking-wider border-b border-slate-900 pb-2">
+              ➕ Publicar Anuncio Flash / Campaña
+            </h3>
+
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Título del Aviso</label>
+              <input 
+                type="text" 
+                value={flashTitle} 
+                onChange={e => setFlashTitle(e.target.value)} 
+                placeholder="Ej: Lanzamiento Sabor Neón"
+                className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Contenido / Texto Informativo</label>
+              <textarea 
+                value={flashContent} 
+                onChange={e => setFlashContent(e.target.value)} 
+                placeholder="Redacte las instrucciones o la publicidad aquí..."
+                rows={3}
+                className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none resize-none"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[10px] uppercase">Destinatarios</label>
+                <select 
+                  value={flashTarget} 
+                  onChange={e => setFlashTarget(e.target.value as any)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+                >
+                  <option value="ambos">Ambos (Operadores y Clientes)</option>
+                  <option value="operadores">Solo Operadores de Caja</option>
+                  <option value="clientes">Solo Clientes del Portal</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 text-[10px] uppercase">Límite de Vistas</label>
+                <input 
+                  type="number" 
+                  min={1} 
+                  value={flashMaxViews} 
+                  onChange={e => setFlashMaxViews(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none font-bold"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Fecha Expiración (opcional)</label>
+              <input 
+                type="datetime-local" 
+                value={flashExpiresAt} 
+                onChange={e => setFlashExpiresAt(e.target.value)}
+                className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
+              />
+            </div>
+
+            {/* Base64 Upload File input */}
+            <div className="space-y-1">
+              <label className="text-gray-400 text-[10px] uppercase">Adjuntar Archivo (Imagen, Video, Doc)</label>
+              <input 
+                type="file" 
+                ref={flashFileInputRef}
+                onChange={handleFlashFileChange}
+                accept="image/*,video/*,.pdf,.doc,.docx,.zip"
+                className="w-full bg-cyber-bg border border-cyber-border p-1.5 rounded-lg text-white text-[11px] focus:outline-none"
+              />
+              {flashAttachmentName && (
+                <div className="mt-1 flex items-center justify-between bg-slate-900 border border-slate-800 p-1.5 rounded text-[10px]">
+                  <span className="truncate text-gray-300">📎 {flashAttachmentName}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setFlashAttachmentUrl('');
+                      setFlashAttachmentType(undefined);
+                      setFlashAttachmentName('');
+                      if (flashFileInputRef.current) flashFileInputRef.current.value = '';
+                    }} 
+                    className="text-red-400 hover:text-red-300 font-bold px-1"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-1.5">
+              <input 
+                type="checkbox" 
+                id="flash-active-chk"
+                checked={flashActive} 
+                onChange={e => setFlashActive(e.target.checked)}
+                className="rounded border-cyber-border bg-cyber-bg text-cyber-pink"
+              />
+              <label htmlFor="flash-active-chk" className="text-gray-300 font-bold select-none cursor-pointer">Activar inmediatamente</label>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-cyber-pink hover:bg-cyber-accent text-black font-bold py-2.5 rounded-lg font-mono text-xs cursor-pointer text-center neon-shadow-pink"
+            >
+              Publicar Anuncio Flash
+            </button>
+          </form>
+
+          {/* List of flash messages */}
+          <div className="xl:col-span-8 space-y-3">
+            <h3 className="text-[10px] text-cyber-pink font-bold uppercase tracking-wider border-b border-slate-900 pb-2">
+              Historial de Anuncios y Campañas Flash
+            </h3>
+
+            <div className="overflow-x-auto rounded-lg border border-slate-900 bg-slate-950/40">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950 border-b border-slate-900 text-[10px] text-gray-400 font-bold">
+                    <th className="p-3">Título</th>
+                    <th className="p-3">Destinatario</th>
+                    <th className="p-3 text-center">Máx Vistas</th>
+                    <th className="p-3">Adjunto</th>
+                    <th className="p-3">Expira</th>
+                    <th className="p-3 text-center">Estado</th>
+                    <th className="p-3 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-900/60">
+                  {flashMessages.map(f => (
+                    <tr key={f.id} className="hover:bg-slate-900/20 transition-colors">
+                      <td className="p-3 font-bold text-white max-w-xs truncate" title={f.content}>{f.title}</td>
+                      <td className="p-3 text-cyan-400 capitalize font-bold">{f.target === 'ambos' ? 'Todos' : f.target}</td>
+                      <td className="p-3 text-center font-bold">{f.maxViews} veces</td>
+                      <td className="p-3 text-gray-300">
+                        {f.attachmentUrl ? (
+                          <span className="bg-slate-900 px-2 py-0.5 rounded border border-slate-800 text-[9px] font-bold text-cyber-pink">
+                            {f.attachmentType === 'image' ? '🖼️ Imagen' : f.attachmentType === 'video' ? '🎥 Video' : '📎 Doc'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-[10px] text-gray-500">
+                        {f.expiresAt ? new Date(f.expiresAt).toLocaleString() : 'Nunca'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleFlashActive(f.id)}
+                          className={`px-2 py-0.5 rounded text-[8px] font-bold tracking-widest border transition-all ${
+                            f.active
+                              ? 'bg-green-950/60 border-green-500/30 text-green-400'
+                              : 'bg-red-950/60 border-red-500/30 text-red-400'
+                          }`}
+                        >
+                          {f.active ? 'ACTIVO' : 'INACTIVO'}
+                        </button>
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteFlash(f.id)}
+                          className="text-gray-500 hover:text-red-400 p-1 cursor-pointer"
+                          title="Eliminar Campaña"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {flashMessages.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-gray-550">
+                        No hay campañas publicitarias ni avisos flash registrados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>

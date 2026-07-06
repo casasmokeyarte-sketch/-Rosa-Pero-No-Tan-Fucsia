@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest } from '../types';
+import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage } from '../types';
+import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
   Truck, 
   ShoppingCart, 
@@ -46,6 +47,10 @@ interface PortalClienteProps {
   clientRequests: ClientRequest[];
   onSubmitRequest: (req: ClientRequest) => void;
   onDeleteClient: (clientId: string) => void;
+  flashMessages: FlashMessage[];
+  flashViews: Record<string, Record<string, number>>;
+  onIncrementFlashView: (flashId: string, viewerId: string) => void;
+  onUpdateClient: (client: Client) => void;
 }
 
 export default function PortalCliente({ 
@@ -60,11 +65,54 @@ export default function PortalCliente({
   showToast,
   clientRequests,
   onSubmitRequest,
-  onDeleteClient
+  onDeleteClient,
+  flashMessages = [],
+  flashViews = {},
+  onIncrementFlashView,
+  onUpdateClient
 }: PortalClienteProps) {
   
   // Navigation
-  const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes'>('pedido');
+  const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion'>('pedido');
+
+  // Sound and Alerter preferences state
+  const [chatTone, setChatTone] = useState(client.chatSoundTone || 'Predeterminado');
+  const [notifTone, setNotifTone] = useState(client.notifSoundTone || 'Predeterminado');
+  const [soundSaveSuccess, setSoundSaveSuccess] = useState(false);
+
+  // Client Flash message popup modal trigger state
+  const [activeFlashPopup, setActiveFlashPopup] = useState<FlashMessage | null>(null);
+
+  // Trigger client advertisement / flash reminder popup on startup or updates
+  useEffect(() => {
+    const activeFlashes = flashMessages.filter(f => 
+      f.active && 
+      (f.target === 'clientes' || f.target === 'ambos') &&
+      (!f.expiresAt || new Date(f.expiresAt) > new Date())
+    );
+
+    const flashToShow = activeFlashes.find(f => {
+      const views = (flashViews[f.id]?.[client.id]) || 0;
+      return views < f.maxViews;
+    });
+
+    if (flashToShow) {
+      setActiveFlashPopup(flashToShow);
+      onIncrementFlashView(flashToShow.id, client.id);
+    }
+  }, [client.id, flashMessages]);
+
+  const handleSaveTones = () => {
+    const updatedClient: Client = {
+      ...client,
+      chatSoundTone: chatTone,
+      notifSoundTone: notifTone
+    };
+    onUpdateClient(updatedClient);
+    setSoundSaveSuccess(true);
+    setTimeout(() => setSoundSaveSuccess(false), 3000);
+    showToast("¡Configuración de sonido guardada exitosamente!", "success");
+  };
 
   // Solicitudes form state
   const [reqType, setReqType] = useState<ClientRequest['type']>('Consulta');
@@ -412,6 +460,18 @@ export default function PortalCliente({
                   {clientRequests.filter(r => r.status === 'Resuelto').length}
                 </span>
               )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('configuracion')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                activeTab === 'configuracion'
+                  ? 'bg-cyber-pink/20 text-cyber-pink border border-cyber-pink/30 shadow-md'
+                  : 'text-gray-400 hover:text-white hover:bg-slate-900/50 border border-transparent'
+              }`}
+            >
+              <span>🔊</span>
+              <span>AJUSTES DE TONO</span>
             </button>
           </div>
 
@@ -1185,6 +1245,94 @@ export default function PortalCliente({
             </div>
           )}
 
+          {/* CLIENT AUDIO CUSTOMIZATION TAB */}
+          {activeTab === 'configuracion' && (
+            <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-6">
+              <div className="border-b border-cyber-border pb-3">
+                <h2 className="text-base font-bold font-mono text-white tracking-wider flex items-center gap-2">
+                  <span>🔊</span>
+                  CONFIGURACIÓN DE TONOS PERSONALIZADOS
+                </h2>
+                <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+                  Elige y prueba los tonos de audio que escucharás en tu cuenta al recibir mensajes del chat de soporte o alertas del búnker logístico.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-mono">
+                {/* Chat message tone */}
+                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3">
+                  <label className="block text-[11px] text-cyber-pink font-bold uppercase tracking-wider">
+                    Tono de Mensajes del Chat:
+                  </label>
+                  <div className="flex gap-2">
+                    <select 
+                      value={chatTone} 
+                      onChange={e => {
+                        const val = e.target.value;
+                        setChatTone(val);
+                        playTone(val as any);
+                      }}
+                      className="flex-1 bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none"
+                    >
+                      {TONE_NAMES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => playTone(chatTone as any)}
+                      className="bg-cyber-pink/20 hover:bg-cyber-pink/40 border border-cyber-pink/30 text-cyber-pink px-4 rounded-lg font-bold cursor-pointer transition-all"
+                      title="Probar sonido"
+                    >
+                      🔊
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-gray-500 leading-normal">
+                    Este sonido se reproducirá cuando los operadores o el sistema te envíen un nuevo mensaje en el chat.
+                  </p>
+                </div>
+
+                {/* System notification tone */}
+                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3">
+                  <label className="block text-[11px] text-cyber-orange font-bold uppercase tracking-wider">
+                    Tono de Notificaciones / Alertas:
+                  </label>
+                  <div className="flex gap-2">
+                    <select 
+                      value={notifTone} 
+                      onChange={e => {
+                        const val = e.target.value;
+                        setNotifTone(val);
+                        playTone(val as any);
+                      }}
+                      className="flex-1 bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none"
+                    >
+                      {TONE_NAMES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => playTone(notifTone as any)}
+                      className="bg-cyber-orange/20 hover:bg-cyber-orange/40 border border-cyber-orange/30 text-cyber-orange px-4 rounded-lg font-bold cursor-pointer transition-all"
+                      title="Probar sonido"
+                    >
+                      🔊
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-gray-500 leading-normal">
+                    Este sonido se reproducirá cuando se completen tus pedidos online o se emitan anuncios flash.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-900">
+                <button
+                  onClick={handleSaveTones}
+                  className="bg-cyber-pink text-black hover:bg-cyber-accent px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer shadow-lg transition-all active:scale-95 neon-shadow-pink"
+                >
+                  Guardar Configuración de Sonido
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>
@@ -1202,6 +1350,76 @@ export default function PortalCliente({
       <footer className="bg-cyber-card/60 border-t border-cyber-border/40 py-4 text-center text-[10px] font-mono text-gray-500 mt-auto">
         Sistema Rosa Fuerte S.A.S. • Protocolo Portal de Clientes v1.2 • Todos los Derechos Reservados 2026.
       </footer>
+
+      {/* Client Advertisement / Flash Message Modal Popup */}
+      {activeFlashPopup && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-cyber-card border-2 border-cyber-pink/85 rounded-2xl max-w-lg w-full p-6 space-y-4 relative shadow-[0_0_50px_rgba(236,72,153,0.35)] font-mono text-xs select-text">
+            
+            {/* Title banner */}
+            <div className="border-b border-cyber-border pb-3 flex justify-between items-center">
+              <h2 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-1.5 animate-pulse">
+                ✨ CAMPAÑA EXCLUSIVA / AVISO CORPORATIVO
+              </h2>
+              <button 
+                onClick={() => setActiveFlashPopup(null)} 
+                className="text-gray-500 hover:text-white transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-cyber-pink font-bold text-sm tracking-wide uppercase">
+                {activeFlashPopup.title}
+              </h3>
+              <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+                {activeFlashPopup.content}
+              </p>
+
+              {/* Attachment layout */}
+              {activeFlashPopup.attachmentUrl && (
+                <div className="pt-2 border-t border-slate-900 flex justify-center">
+                  {activeFlashPopup.attachmentType === 'image' && (
+                    <img 
+                      src={activeFlashPopup.attachmentUrl} 
+                      alt={activeFlashPopup.attachmentName || 'Publicidad'} 
+                      className="max-w-full rounded-lg border border-cyber-border max-h-60 object-contain shadow-lg"
+                    />
+                  )}
+                  {activeFlashPopup.attachmentType === 'video' && (
+                    <video 
+                      src={activeFlashPopup.attachmentUrl} 
+                      controls 
+                      className="max-w-full rounded-lg border border-cyber-border max-h-60 shadow-lg"
+                    />
+                  )}
+                  {activeFlashPopup.attachmentType === 'file' && (
+                    <a 
+                      href={activeFlashPopup.attachmentUrl} 
+                      download={activeFlashPopup.attachmentName || 'anuncio_adjunto'}
+                      className="flex items-center gap-2.5 p-3 bg-slate-950/80 hover:bg-slate-900 border border-slate-900 hover:border-cyber-pink rounded-xl text-white hover:text-cyber-pink transition-all w-full truncate"
+                    >
+                      <span>📎</span>
+                      <span className="truncate">{activeFlashPopup.attachmentName || 'Descargar archivo promocional'}</span>
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-900 flex justify-end">
+              <button
+                onClick={() => setActiveFlashPopup(null)}
+                className="bg-cyber-pink text-black hover:bg-cyber-accent px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer shadow-lg active:scale-95 transition-all text-center neon-shadow-pink"
+              >
+                ENTENDIDO / EMPEZAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -12,6 +12,8 @@ export interface Client {
   assignedAgentId?: string;
   assignedAgentName?: string;
   password?: string;
+  chatSoundTone?: string;
+  notifSoundTone?: string;
 }
 
 export interface Product {
@@ -115,6 +117,60 @@ export interface ClientRequest {
   agentId?: string;
 }
 
+export interface Discount {
+  id: string;
+  name: string;
+  type: 'porcentaje' | 'fijo';
+  value: number;
+  active: boolean;
+  startDate?: string;
+  endDate?: string;
+  startTime?: string;
+  endTime?: string;
+  activeDays: number[];
+  appliesTo: 'todos' | 'facturacion' | 'domicilios';
+  createdAt: string;
+}
+
+export interface FlashMessage {
+  id: string;
+  title: string;
+  content: string;
+  target: 'operadores' | 'clientes' | 'ambos';
+  attachmentUrl?: string;
+  attachmentType?: 'image' | 'video' | 'file';
+  attachmentName?: string;
+  maxViews: number;
+  active: boolean;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface SoundSettings {
+  soundEnabled: boolean;
+  chatSoundEnabled: boolean;
+  notifSoundEnabled: boolean;
+  defaultTone: string;
+}
+
+export interface PayrollEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  period: string;
+  baseSalary: number;
+  overtimeHours: number;
+  overtimeRate: number;
+  bonuses: { concept: string; amount: number }[];
+  deductions: { concept: string; amount: number }[];
+  paymentDate: string;
+  paymentMethod: string;
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
 export interface UserPermissions {
   // Módulos (Acceso a Pestañas)
   dashboard: boolean;
@@ -131,6 +187,7 @@ export interface UserPermissions {
   configuraciones: boolean;
   solicitudes_clientes: boolean;
   historial_facturas: boolean;
+  nomina: boolean;
 
   // Procesos y Operaciones Críticas
   crear_factura: boolean;
