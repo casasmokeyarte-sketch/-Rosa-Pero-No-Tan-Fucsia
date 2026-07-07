@@ -82,3 +82,51 @@ CREATE TABLE IF NOT EXISTS payroll_entries (
 CREATE INDEX IF NOT EXISTS idx_payroll_user ON payroll_entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_flash_views_viewer ON flash_views(viewer_id);
 CREATE INDEX IF NOT EXISTS idx_discounts_active ON discounts(active);
+
+-- ============================================================
+-- 6. Columnas faltantes para adaptar el esquema a la estructura de la aplicación React
+-- ============================================================
+
+-- En la tabla 'products' (para soportar gramaje y stock por usuario)
+ALTER TABLE products 
+ADD COLUMN IF NOT EXISTS special_price_1g numeric(12,2),
+ADD COLUMN IF NOT EXISTS special_price_half_g numeric(12,2),
+ADD COLUMN IF NOT EXISTS special_price_quarter_g numeric(12,2),
+ADD COLUMN IF NOT EXISTS user_stocks jsonb DEFAULT '{}';
+
+-- En la tabla 'invoices' (para firmas, métodos de entrega y guías de mensajería)
+ALTER TABLE invoices 
+ADD COLUMN IF NOT EXISTS client_signature text,
+ADD COLUMN IF NOT EXISTS delivery_method text,
+ADD COLUMN IF NOT EXISTS guide_name text,
+ADD COLUMN IF NOT EXISTS guide_rut text,
+ADD COLUMN IF NOT EXISTS guide_phone text,
+ADD COLUMN IF NOT EXISTS guide_notes text;
+
+-- En la tabla 'expenses' (para el método de pago del egreso)
+ALTER TABLE expenses 
+ADD COLUMN IF NOT EXISTS payment_method text;
+
+-- En la tabla 'chat_messages' (para registrar cuál agente envió/respondió el chat)
+ALTER TABLE chat_messages 
+ADD COLUMN IF NOT EXISTS agent_id text;
+
+-- ============================================================
+-- 7. Nueva tabla de Traspasos de Inventario (para historiales de traspaso)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id text PRIMARY KEY,
+  origin text NOT NULL,
+  destination text NOT NULL,
+  origin_name text NOT NULL,
+  destination_name text NOT NULL,
+  items jsonb DEFAULT '[]',
+  status text CHECK (status IN ('pendiente', 'aprobado', 'rechazado')) DEFAULT 'pendiente',
+  created_at timestamptz DEFAULT now(),
+  resolved_at timestamptz,
+  support_notes text
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_origin ON stock_transfers(origin);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_destination ON stock_transfers(destination);
+

@@ -28,6 +28,8 @@ import {
   INITIAL_SHIFTS, 
   INITIAL_ADJUSTMENTS 
 } from './utils/dummyData';
+import { supabase, isSupabaseEnabled } from './lib/supabase';
+import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField } from './lib/sync';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -128,6 +130,8 @@ export function getUserPermissions(user: User): UserPermissions {
 }
 
 export default function App() {
+  
+  const [isLoadingDB, setIsLoadingDB] = useState<boolean>(isSupabaseEnabled);
   
   // State Initialization with lazy LocalStorage loading
   const [config, setConfig] = useState<BusinessConfig>(() => {
@@ -347,10 +351,12 @@ export default function App() {
 
   const handleAddClientRequest = (req: ClientRequest) => {
     setClientRequests(prev => [req, ...prev]);
+    if (isSupabaseEnabled) syncUpsert('client_requests', req);
   };
 
   const handleUpdateClientRequest = (updated: ClientRequest) => {
     setClientRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
+    if (isSupabaseEnabled) syncUpsert('client_requests', updated);
   };
 
   useEffect(() => { localStorage.setItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
@@ -374,16 +380,19 @@ export default function App() {
   const handleAddPayrollEntry = (entry: PayrollEntry) => {
     setPayrollEntries(prev => [...prev, entry]);
     showToast(`Recibo de nómina para ${entry.userName} generado con éxito`, "success");
+    if (isSupabaseEnabled) syncUpsert('payroll_entries', entry);
   };
 
   const handleUpdatePayrollEntry = (entry: PayrollEntry) => {
     setPayrollEntries(prev => prev.map(p => p.id === entry.id ? entry : p));
     showToast(`Recibo de nómina para ${entry.userName} actualizado con éxito`, "success");
+    if (isSupabaseEnabled) syncUpsert('payroll_entries', entry);
   };
 
   const handleDeletePayrollEntry = (id: string) => {
     setPayrollEntries(prev => prev.filter(p => p.id !== id));
     showToast("Recibo de nómina eliminado", "warning");
+    if (isSupabaseEnabled) syncDelete('payroll_entries', id);
   };
 
   // Play sounds for chat messages
@@ -445,20 +454,26 @@ export default function App() {
       attachment
     };
     setChatMessages(prev => [...prev, newMsg]);
+    if (isSupabaseEnabled) syncUpsert('chat_messages', newMsg);
   };
 
   const handleAssignAgent = (clientId: string, agentId: string, agentName: string) => {
+    let updatedClient: Client | undefined;
     setClients(prev => prev.map(c => {
       if (c.id === clientId) {
-        return {
+        updatedClient = {
           ...c,
           assignedAgentId: agentId,
           assignedAgentName: agentName
         };
+        return updatedClient;
       }
       return c;
     }));
     showToast(`Enlace de chat asignado a ${agentName}`, "success");
+    if (isSupabaseEnabled && updatedClient) {
+      syncUpsert('clients', updatedClient);
+    }
   };
 
   const handleClearChat = (clientId: string) => {
@@ -592,6 +607,153 @@ export default function App() {
       document.exitFullscreen();
     }
   };
+
+  // Load database from Supabase on mount
+  useEffect(() => {
+    if (!isSupabaseEnabled) return;
+
+    const loadAllData = async () => {
+      try {
+        setIsLoadingDB(true);
+
+        // 1. Fetch from Supabase
+        const dbConfig = await fetchConfig();
+        const dbUsers = await fetchTable('users');
+        const dbProducts = await fetchTable('products');
+        const dbClients = await fetchTable('clients');
+        const dbInvoices = await fetchTable('invoices');
+        const dbExpenses = await fetchTable('expenses');
+        const dbShifts = await fetchTable('shifts');
+        const dbAdjustments = await fetchTable('stock_adjustments');
+        const dbTransfers = await fetchTable('stock_transfers');
+        const dbChatMessages = await fetchTable('chat_messages');
+        const dbClientRequests = await fetchTable('client_requests');
+        const dbDiscounts = await fetchTable('discounts');
+        const dbFlashMessages = await fetchTable('flash_messages');
+        const dbPayroll = await fetchTable('payroll_entries');
+
+        // 2. Seeding check and upload
+        if (dbConfig) {
+          setConfig(dbConfig);
+        } else {
+          await syncUpsert('business_config', { ...config, id: 'singleton' });
+        }
+
+        if (dbUsers && dbUsers.length > 0) {
+          setUsers(dbUsers);
+        } else {
+          for (const u of users) {
+            await syncUpsert('users', u);
+          }
+        }
+
+        if (dbProducts && dbProducts.length > 0) {
+          setProducts(dbProducts);
+        } else {
+          for (const p of products) {
+            await syncUpsert('products', p);
+          }
+        }
+
+        if (dbClients && dbClients.length > 0) {
+          setClients(dbClients);
+        } else {
+          for (const c of clients) {
+            await syncUpsert('clients', c);
+          }
+        }
+
+        if (dbInvoices && dbInvoices.length > 0) {
+          setInvoices(dbInvoices);
+        } else if (invoices.length > 0) {
+          for (const inv of invoices) {
+            await syncUpsert('invoices', inv);
+          }
+        }
+
+        if (dbExpenses && dbExpenses.length > 0) {
+          setExpenses(dbExpenses);
+        } else if (expenses.length > 0) {
+          for (const exp of expenses) {
+            await syncUpsert('expenses', exp);
+          }
+        }
+
+        if (dbShifts && dbShifts.length > 0) {
+          setShifts(dbShifts);
+        } else if (shifts.length > 0) {
+          for (const sh of shifts) {
+            await syncUpsert('shifts', sh);
+          }
+        }
+
+        if (dbAdjustments && dbAdjustments.length > 0) {
+          setAdjustments(dbAdjustments);
+        } else if (adjustments.length > 0) {
+          for (const adj of adjustments) {
+            await syncUpsert('stock_adjustments', adj);
+          }
+        }
+
+        if (dbTransfers && dbTransfers.length > 0) {
+          setTransfers(dbTransfers);
+        } else if (transfers.length > 0) {
+          for (const tr of transfers) {
+            await syncUpsert('stock_transfers', tr);
+          }
+        }
+
+        if (dbChatMessages && dbChatMessages.length > 0) {
+          setChatMessages(dbChatMessages);
+        } else if (chatMessages.length > 0) {
+          for (const msg of chatMessages) {
+            await syncUpsert('chat_messages', msg);
+          }
+        }
+
+        if (dbClientRequests && dbClientRequests.length > 0) {
+          setClientRequests(dbClientRequests);
+        } else if (clientRequests.length > 0) {
+          for (const req of clientRequests) {
+            await syncUpsert('client_requests', req);
+          }
+        }
+
+        if (dbDiscounts && dbDiscounts.length > 0) {
+          setDiscounts(dbDiscounts);
+        } else if (discounts.length > 0) {
+          for (const disc of discounts) {
+            await syncUpsert('discounts', disc);
+          }
+        }
+
+        if (dbFlashMessages && dbFlashMessages.length > 0) {
+          setFlashMessages(dbFlashMessages);
+        } else if (flashMessages.length > 0) {
+          for (const fm of flashMessages) {
+            await syncUpsert('flash_messages', fm);
+          }
+        }
+
+        if (dbPayroll && dbPayroll.length > 0) {
+          setPayrollEntries(dbPayroll);
+        } else if (payrollEntries.length > 0) {
+          for (const pe of payrollEntries) {
+            await syncUpsert('payroll_entries', pe);
+          }
+        }
+
+        showToast("Conexión en línea establecida. Base de datos sincronizada.", "success");
+      } catch (err) {
+        console.error("Error al cargar la base de datos de Supabase:", err);
+        showToast("Error de conexión con base de datos. Modo offline activo.", "error");
+      } finally {
+        setIsLoadingDB(false);
+      }
+    };
+
+    loadAllData();
+  }, []);
 
   // Keep ticking live clock
   useEffect(() => {
@@ -742,28 +904,74 @@ export default function App() {
     });
 
     showToast(`Remisión/Factura #${newInvoice.invoiceNumber} guardada y despachada`, "success");
+
+    // Supabase sync
+    if (isSupabaseEnabled) {
+      syncUpsert('invoices', newInvoice);
+      for (const log of newStockLogs) {
+        syncUpsert('stock_adjustments', log);
+      }
+      newInvoice.items.forEach(item => {
+        const p = products.find(prod => prod.id === item.productId);
+        if (p) {
+          const userStocks = p.userStocks || {};
+          const currentUserId = currentUser.id;
+          const currentStock = userStocks[currentUserId] !== undefined ? userStocks[currentUserId] : 0;
+          syncUpsert('products', {
+            ...p,
+            userStocks: {
+              ...userStocks,
+              [currentUserId]: Math.max(0, currentStock - item.quantity)
+            }
+          });
+        }
+      });
+      if (newInvoice.paymentMethod === 'Crédito') {
+        const c = clients.find(cl => cl.id === newInvoice.clientId);
+        if (c) {
+          syncUpsert('clients', {
+            ...c,
+            outstandingBalance: c.outstandingBalance + newInvoice.total
+          });
+        }
+      }
+      const activeShift = shifts.find(s => s.status === 'Abierta');
+      if (activeShift) {
+        syncUpsert('shifts', {
+          ...activeShift,
+          salesCash: activeShift.salesCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0),
+          salesCard: activeShift.salesCard + (newInvoice.paymentMethod === 'Tarjeta' ? newInvoice.total : 0),
+          salesCredit: activeShift.salesCredit + (newInvoice.paymentMethod === 'Crédito' ? newInvoice.total : 0),
+          expectedCash: activeShift.expectedCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0)
+        });
+      }
+    }
   };
 
   const handleUpdateInvoice = (updatedInvoice: Invoice) => {
     setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
     showToast(`Estado de la orden #${updatedInvoice.invoiceNumber} actualizado a: ${updatedInvoice.deliveryStatus || 'Listo'}`, "info");
+    if (isSupabaseEnabled) syncUpsert('invoices', updatedInvoice);
   };
 
   // 2. Client Operations
   const handleAddClient = (client: Client) => {
     setClients(prev => [...prev, client]);
     showToast(`Cliente '${client.name}' registrado exitosamente`, "success");
+    if (isSupabaseEnabled) syncUpsert('clients', client);
   };
 
   const handleUpdateClient = (updatedClient: Client) => {
     setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
     showToast(`Datos de '${updatedClient.name}' actualizados con éxito`, "info");
+    if (isSupabaseEnabled) syncUpsert('clients', updatedClient);
   };
 
   const handleDeleteClient = (clientId: string) => {
     const target = clients.find(c => c.id === clientId);
     setClients(prev => prev.filter(c => c.id !== clientId));
     showToast(`Expediente del cliente '${target?.name || clientId}' eliminado`, "warning");
+    if (isSupabaseEnabled) syncDelete('clients', clientId);
   };
 
   const handleImportClients = (imported: Client[]) => {
@@ -776,6 +984,7 @@ export default function App() {
         } else {
           merged.push(newC);
         }
+        if (isSupabaseEnabled) syncUpsert('clients', newC);
       });
       return merged;
     });
@@ -785,6 +994,7 @@ export default function App() {
   const handleAddProduct = (product: Product) => {
     setProducts(prev => [...prev, product]);
     showToast(`Insumo '${product.name}' catalogado con éxito`, "success");
+    if (isSupabaseEnabled) syncUpsert('products', product);
   };
 
   const handleImportProducts = (imported: Product[]) => {
@@ -797,6 +1007,7 @@ export default function App() {
         } else {
           merged.push(newP);
         }
+        if (isSupabaseEnabled) syncUpsert('products', newP);
       });
       return merged;
     });
@@ -811,15 +1022,18 @@ export default function App() {
           const qtyDiff = adjustment.type === 'Ingreso' || adjustment.type === 'Inventario Inicial' 
             ? adjustment.quantity 
             : -adjustment.quantity;
-          return {
+          const updated = {
             ...p,
             stock: Math.max(0, p.stock + qtyDiff)
           };
+          if (isSupabaseEnabled) syncUpsert('products', updated);
+          return updated;
         }
         return p;
       });
     });
     showToast(`Ajuste de stock (${adjustment.type}): ${adjustment.quantity} unidades`, "info");
+    if (isSupabaseEnabled) syncUpsert('stock_adjustments', adjustment);
   };
 
   const handleAddTransfer = (newTransfer: StockTransfer) => {
@@ -831,10 +1045,12 @@ export default function App() {
         return prevProducts.map(p => {
           const item = newTransfer.items.find(it => it.productId === p.id);
           if (item) {
-            return {
+            const updated = {
               ...p,
               stock: Math.max(0, p.stock - item.quantity)
             };
+            if (isSupabaseEnabled) syncUpsert('products', updated);
+            return updated;
           }
           return p;
         });
@@ -849,19 +1065,23 @@ export default function App() {
           if (item) {
             const userStocks = p.userStocks || {};
             const userStock = userStocks[userId] !== undefined ? userStocks[userId] : 0;
-            return {
+            const updated = {
               ...p,
               userStocks: {
                 ...userStocks,
                 [userId]: Math.max(0, userStock - item.quantity)
               }
             };
+            if (isSupabaseEnabled) syncUpsert('products', updated);
+            return updated;
           }
           return p;
         });
       });
       showToast(`Solicitud de devolución enviada a Bodega Principal`, "success");
     }
+
+    if (isSupabaseEnabled) syncUpsert('stock_transfers', newTransfer);
   };
 
   const handleUpdateTransferStatus = (transferId: string, status: 'aprobado' | 'rechazado', supportNotes?: string) => {
@@ -869,13 +1089,13 @@ export default function App() {
     setTransfers(prevTransfers => {
       return prevTransfers.map(t => {
         if (t.id === transferId) {
-          targetTransfer = t;
-          return {
+          targetTransfer = {
             ...t,
             status,
             resolvedAt: new Date().toISOString(),
             supportNotes: supportNotes !== undefined ? supportNotes : t.supportNotes
           };
+          return targetTransfer;
         }
         return t;
       });
@@ -884,6 +1104,8 @@ export default function App() {
     // Wait until state updater finishes or use targetTransfer derived
     setTimeout(() => {
       if (!targetTransfer) return;
+
+      if (isSupabaseEnabled) syncUpsert('stock_transfers', targetTransfer);
 
       if (status === 'aprobado') {
         if (targetTransfer.origin === 'bodega') {
@@ -895,13 +1117,15 @@ export default function App() {
               if (item) {
                 const userStocks = p.userStocks || {};
                 const userStock = userStocks[userId] !== undefined ? userStocks[userId] : 0;
-                return {
+                const updated = {
                   ...p,
                   userStocks: {
                     ...userStocks,
                     [userId]: userStock + item.quantity
                   }
                 };
+                if (isSupabaseEnabled) syncUpsert('products', updated);
+                return updated;
               }
               return p;
             });
@@ -913,10 +1137,12 @@ export default function App() {
             return prevProducts.map(p => {
               const item = targetTransfer!.items.find(it => it.productId === p.id);
               if (item) {
-                return {
+                const updated = {
                   ...p,
                   stock: p.stock + item.quantity
                 };
+                if (isSupabaseEnabled) syncUpsert('products', updated);
+                return updated;
               }
               return p;
             });
@@ -931,10 +1157,12 @@ export default function App() {
             return prevProducts.map(p => {
               const item = targetTransfer!.items.find(it => it.productId === p.id);
               if (item) {
-                return {
+                const updated = {
                   ...p,
                   stock: p.stock + item.quantity
                 };
+                if (isSupabaseEnabled) syncUpsert('products', updated);
+                return updated;
               }
               return p;
             });
@@ -949,13 +1177,15 @@ export default function App() {
               if (item) {
                 const userStocks = p.userStocks || {};
                 const userStock = userStocks[userId] !== undefined ? userStocks[userId] : 0;
-                return {
+                const updated = {
                   ...p,
                   userStocks: {
                     ...userStocks,
                     [userId]: userStock + item.quantity
                   }
                 };
+                if (isSupabaseEnabled) syncUpsert('products', updated);
+                return updated;
               }
               return p;
             });
@@ -982,14 +1212,16 @@ export default function App() {
     };
     setShifts(prev => [...prev, newShift]);
     showToast(`Arqueo inicial cargado ($${initialCash} USD). Turno ABIERTO.`, "success");
+    if (isSupabaseEnabled) syncUpsert('shifts', newShift);
   };
 
   const handleCloseShift = (shiftId: string, actualCash: number, notes: string) => {
+    let updatedShift: Shift | undefined;
     setShifts(prevShifts => {
       return prevShifts.map(s => {
         if (s.id === shiftId) {
           const expected = s.expectedCash;
-          return {
+          updatedShift = {
             ...s,
             endTime: new Date().toISOString(),
             actualCash,
@@ -997,11 +1229,17 @@ export default function App() {
             status: 'Cerrada' as const,
             notes
           };
+          return updatedShift;
         }
         return s;
       });
     });
     showToast("Turno cerrado y arqueo final reportado exitosamente", "success");
+    if (isSupabaseEnabled) {
+      setTimeout(() => {
+        if (updatedShift) syncUpsert('shifts', updatedShift);
+      }, 50);
+    }
   };
 
   // 5. Payment on Accounts (portfolio collection)
@@ -1011,11 +1249,13 @@ export default function App() {
       return prevInvoices.map(inv => {
         if (inv.id === invoiceId) {
           const newTotalRemaining = Math.max(0, inv.total - amount);
-          return {
+          const updated = {
             ...inv,
             total: newTotalRemaining,
             paymentStatus: newTotalRemaining === 0 ? 'Pagado' as const : 'Pendiente' as const
           };
+          if (isSupabaseEnabled) syncUpsert('invoices', updated);
+          return updated;
         }
         return inv;
       });
@@ -1026,10 +1266,12 @@ export default function App() {
     setClients(prevClients => {
       return prevClients.map(c => {
         if (c.id === targetInvoice.clientId) {
-          return {
+          const updated = {
             ...c,
             outstandingBalance: Math.max(0, c.outstandingBalance - amount)
           };
+          if (isSupabaseEnabled) syncUpsert('clients', updated);
+          return updated;
         }
         return c;
       });
@@ -1039,11 +1281,13 @@ export default function App() {
     setShifts(prevShifts => {
       return prevShifts.map(s => {
         if (s.status === 'Abierta') {
-          return {
+          const updated = {
             ...s,
             salesCash: s.salesCash + amount,
             expectedCash: s.expectedCash + amount
           };
+          if (isSupabaseEnabled) syncUpsert('shifts', updated);
+          return updated;
         }
         return s;
       });
@@ -1054,17 +1298,20 @@ export default function App() {
   // 6. Expense additions
   const handleAddExpense = (expense: Expense) => {
     setExpenses(prev => [...prev, expense]);
+    if (isSupabaseEnabled) syncUpsert('expenses', expense);
     
     // deduct from active shiftexpected cash immediately if paid in cash
     if (expense.paymentMethod === 'Efectivo') {
       setShifts(prevShifts => {
         return prevShifts.map(s => {
           if (s.status === 'Abierta') {
-            return {
+            const updated = {
               ...s,
               expensesTotal: s.expensesTotal + expense.amount,
               expectedCash: s.expectedCash - expense.amount
             };
+            if (isSupabaseEnabled) syncUpsert('shifts', updated);
+            return updated;
           }
           return s;
         });
@@ -1077,11 +1324,13 @@ export default function App() {
   const handleUpdateConfig = (newConfig: BusinessConfig) => {
     setConfig(newConfig);
     showToast("Configuración general guardada con éxito", "success");
+    if (isSupabaseEnabled) syncUpsert('business_config', { ...newConfig, id: 'singleton' });
   };
 
   const handleAddUser = (user: User) => {
     setUsers(prev => [...prev, user]);
     showToast(`Usuario/Agente '${user.fullName}' creado exitosamente`, "success");
+    if (isSupabaseEnabled) syncUpsert('users', user);
   };
 
   const handleUpdateUser = (updatedUser: User) => {
@@ -1090,11 +1339,13 @@ export default function App() {
       setCurrentUser(updatedUser);
     }
     showToast(`Usuario '${updatedUser.fullName}' actualizado exitosamente`, "success");
+    if (isSupabaseEnabled) syncUpsert('users', updatedUser);
   };
 
   const handleDeleteUser = (userId: string) => {
     setUsers(prev => prev.filter(u => u.id !== userId));
     showToast("Acceso de usuario/agente revocado", "warning");
+    if (isSupabaseEnabled) syncDelete('users', userId);
   };
 
   const handleImportDatabase = (data: {
@@ -1157,6 +1408,19 @@ export default function App() {
     { id: 'nomina', label: 'Nómina', icon: DollarSign, color: 'text-cyber-green' },
     { id: 'configuraciones', label: 'Configuraciones', icon: Settings, color: 'text-cyber-blue' }
   ];
+
+  // Render Loading screen while connecting to Supabase
+  if (isLoadingDB) {
+    return (
+      <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex flex-col items-center justify-center relative overflow-hidden scanlines p-4">
+        <div className="text-center space-y-4 relative z-10 max-w-md">
+          <div className="w-16 h-16 border-4 border-cyber-pink border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <h2 className="text-xl font-bold font-mono tracking-widest text-cyber-pink animate-pulse">CONEXIÓN ONLINE</h2>
+          <p className="text-xs font-mono text-gray-400">Estableciendo enlace y sincronizando base de datos con Supabase. Por favor espere...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Render Client Portal if client logged in
   if (currentClient) {
