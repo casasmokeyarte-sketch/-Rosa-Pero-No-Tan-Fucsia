@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount } from '../types';
+import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User } from '../types';
 import CyberEmpty from './CyberEmpty';
 import { 
   ShoppingCart, 
@@ -16,7 +16,8 @@ import {
   Clock,
   ShieldAlert,
   Users,
-  Truck
+  Truck,
+  X
 } from 'lucide-react';
 
 interface FacturacionProps {
@@ -29,6 +30,7 @@ interface FacturacionProps {
   onAddInvoice: (invoice: Invoice) => void;
   onAddClient: (client: Client) => void;
   discounts: Discount[];
+  users: User[];
 }
 
 export default function Facturacion({
@@ -40,7 +42,8 @@ export default function Facturacion({
   currentUser,
   onAddInvoice,
   onAddClient,
-  discounts = []
+  discounts = [],
+  users = []
 }: FacturacionProps) {
   // Check if there is an active shift
   const activeShift = shifts.find(s => s.status === 'Abierta');
@@ -97,6 +100,13 @@ export default function Facturacion({
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+
+  // Discount authorization state
+  const [showDiscountAuthModal, setShowDiscountAuthModal] = useState(false);
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('');
+  const [supervisorPassword, setSupervisorPassword] = useState('');
+  const [discountAuthError, setDiscountAuthError] = useState('');
+  const [discountAuthorizedBy, setDiscountAuthorizedBy] = useState<string | null>(null);
 
   // Filter valid promotions based on current date, time, day, and billing context
   const getActivePromotions = () => {
@@ -558,6 +568,7 @@ export default function Facturacion({
     setSelectedClient(null);
     setClientSearch('');
     setDiscount(0);
+    setDiscountAuthorizedBy(null);
     setErrorMsg(null);
     setIsDelivery(false);
     setDeliveryFee(0);
@@ -974,16 +985,48 @@ export default function Facturacion({
             )}
 
             <div className="space-y-1.5 pt-2 border-t border-slate-800">
-              <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (COP):</label>
+              <div className="flex justify-between items-center">
+                <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (COP):</label>
+                {!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true) && !discountAuthorizedBy && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscountAuthModal(true)}
+                    className="text-[9px] bg-cyber-pink/15 hover:bg-cyber-pink/25 border border-cyber-pink/30 text-cyber-pink px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    🔑 Autorizar
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <input 
                   type="number" 
                   value={discount} 
+                  disabled={!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)}
                   onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-right pr-6 font-mono font-bold"
+                  className={`bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-right pr-6 font-mono font-bold ${
+                    !(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)
+                      ? 'opacity-60 cursor-not-allowed border-slate-800'
+                      : ''
+                  }`}
+                  placeholder={!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy) ? "Bloqueado" : "0"}
                 />
                 <span className="absolute right-2.5 top-2 text-[10px] text-gray-500">$</span>
               </div>
+              {discountAuthorizedBy && (
+                <div className="text-[9px] text-cyber-green font-mono flex items-center justify-between">
+                  <span>✓ Autorizado por {discountAuthorizedBy}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setDiscountAuthorizedBy(null);
+                      setDiscount(0);
+                    }} 
+                    className="text-[8px] text-red-400 hover:underline cursor-pointer"
+                  >
+                    Revocar
+                  </button>
+                </div>
+              )}
             </div>
 
             {activePromos.length > 0 && (
@@ -1305,6 +1348,103 @@ export default function Facturacion({
         </button>
 
       </div>
+
+      {/* MODAL / OVERLAY: Supervisor Discount Authorization */}
+      {showDiscountAuthModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                <span>🔑</span> Autorización de Descuento
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowDiscountAuthModal(false);
+                  setSupervisorPassword('');
+                  setDiscountAuthError('');
+                }}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <p className="text-[10px] text-gray-400 leading-normal font-sans">
+              Se requiere la autorización de un administrador o supervisor para aplicar descuentos a esta factura.
+            </p>
+
+            {discountAuthError && (
+              <div className="bg-red-950/30 border border-red-900/50 p-2.5 rounded-lg text-red-400 text-[10px] flex items-center gap-1.5 font-mono leading-tight">
+                <AlertCircle size={12} className="shrink-0 animate-pulse" />
+                <span>{discountAuthError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="block text-[9px] text-gray-500 uppercase tracking-wider">Supervisor / Administrador:</label>
+                <select
+                  value={selectedSupervisorId}
+                  onChange={e => setSelectedSupervisorId(e.target.value)}
+                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none font-mono"
+                >
+                  <option value="">-- Seleccionar Supervisor --</option>
+                  {(users || []).filter(u => u.role === 'Administrador' || u.permissions?.autorizar_descuentos === true).map(u => (
+                    <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[9px] text-gray-500 uppercase tracking-wider">PIN / Contraseña de Autorización:</label>
+                <input
+                  type="password"
+                  placeholder="Ingrese contraseña"
+                  value={supervisorPassword}
+                  onChange={e => setSupervisorPassword(e.target.value)}
+                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none text-center font-mono font-bold"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDiscountAuthModal(false);
+                  setSupervisorPassword('');
+                  setDiscountAuthError('');
+                }}
+                className="flex-1 py-2 bg-slate-900 border border-slate-800 text-gray-400 hover:text-white rounded-lg text-[10px] font-bold font-mono cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const supervisor = (users || []).find(u => u.id === selectedSupervisorId);
+                  if (!supervisor) {
+                    setDiscountAuthError("Seleccione un supervisor de la lista");
+                    return;
+                  }
+                  if (supervisor.password !== supervisorPassword) {
+                    setDiscountAuthError("Contraseña/PIN incorrecto");
+                    return;
+                  }
+                  
+                  setDiscountAuthorizedBy(supervisor.fullName);
+                  setShowDiscountAuthModal(false);
+                  setSupervisorPassword('');
+                  setDiscountAuthError('');
+                }}
+                className="flex-1 py-2 bg-cyber-pink text-black hover:bg-cyber-accent rounded-lg text-[10px] font-bold font-mono cursor-pointer neon-shadow-pink"
+              >
+                Autorizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
            {/* MODAL / OVERLAY: High-fidelity thermal invoice visualizer */}
       {generatedInvoice && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">

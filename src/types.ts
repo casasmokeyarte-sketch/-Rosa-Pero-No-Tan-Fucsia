@@ -72,6 +72,7 @@ export interface Invoice {
   guidePhone?: string;
   guideAddress?: string;
   guideNotes?: string;
+  cardFee?: number;
 }
 
 export interface Expense {
@@ -201,6 +202,7 @@ export interface UserPermissions {
   abonar_cartera: boolean;
   modificar_configuracion: boolean;
   gestionar_usuarios: boolean;
+  autorizar_descuentos?: boolean;
 
   // Acciones Detalladas por Módulo
   imprimir_facturas: boolean;
@@ -239,6 +241,8 @@ export interface BusinessConfig {
   currency: string; // e.g. COP, USD, etc.
   paymentMethods?: string[];
   productCategories?: string[];
+  cardFeePercentage?: number;
+  cardFeeEnabled?: boolean;
 }
 
 export interface StockAdjustment {

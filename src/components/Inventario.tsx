@@ -37,6 +37,8 @@ interface InventarioProps {
   onAddTransfer?: (transfer: StockTransfer) => void;
   onUpdateTransferStatus?: (transferId: string, status: 'aprobado' | 'rechazado', supportNotes?: string) => void;
   users?: User[];
+  onUpdateProduct: (product: Product) => void;
+  onDeleteProduct: (productId: string) => void;
 }
 
 export default function Inventario({ 
@@ -50,7 +52,9 @@ export default function Inventario({
   transfers = [],
   onAddTransfer,
   onUpdateTransferStatus,
-  users = []
+  users = [],
+  onUpdateProduct,
+  onDeleteProduct
 }: InventarioProps) {
   
   // States
@@ -58,6 +62,22 @@ export default function Inventario({
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
+
+  // Edit product form states
+  const [editName, setEditName] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editPrice, setEditPrice] = useState(0);
+  const [editCost, setEditCost] = useState(0);
+  const [editMinStock, setEditMinStock] = useState(0);
+  const [editEmoji, setEditEmoji] = useState('📦');
+  const [editUnitType, setEditUnitType] = useState<'unidad' | 'gr' | 'ml' | 'l'>('unidad');
+  const [editSpecialPrice1g, setEditSpecialPrice1g] = useState('');
+  const [editSpecialPriceHalfG, setEditSpecialPriceHalfG] = useState('');
+  const [editSpecialPriceQuarterG, setEditSpecialPriceQuarterG] = useState('');
   
   // Subtab State
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'traspasos'>('catalogo');
@@ -159,6 +179,60 @@ export default function Inventario({
     setNewSpecialPriceHalfG('');
     setNewSpecialPriceQuarterG('');
     setShowAddProduct(false);
+  };
+
+  // Start product edit
+  const handleStartEditProduct = (p: Product) => {
+    setEditingProduct(p);
+    setEditName(p.name);
+    setEditCode(p.code);
+    setEditCategory(p.category);
+    setEditPrice(p.price);
+    setEditCost(p.cost);
+    setEditMinStock(p.minStock);
+    setEditEmoji(p.imageUrl || '📦');
+    setEditUnitType(p.unitType || 'unidad');
+    setEditSpecialPrice1g(p.specialPrice1g?.toString() || '');
+    setEditSpecialPriceHalfG(p.specialPriceHalfG?.toString() || '');
+    setEditSpecialPriceQuarterG(p.specialPriceQuarterG?.toString() || '');
+  };
+
+  // Submit product edit
+  const handleUpdateProductSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    const updated: Product = {
+      ...editingProduct,
+      name: editName,
+      code: editCode,
+      category: editCategory,
+      price: parseFloat(editPrice.toString()) || 0,
+      cost: parseFloat(editCost.toString()) || 0,
+      minStock: parseFloat(editMinStock.toString()) || 0,
+      imageUrl: editEmoji,
+      unitType: editUnitType,
+      specialPrice1g: editUnitType === 'gr' && editSpecialPrice1g !== '' ? parseFloat(editSpecialPrice1g) : undefined,
+      specialPriceHalfG: editUnitType === 'gr' && editSpecialPriceHalfG !== '' ? parseFloat(editSpecialPriceHalfG) : undefined,
+      specialPriceQuarterG: editUnitType === 'gr' && editSpecialPriceQuarterG !== '' ? parseFloat(editSpecialPriceQuarterG) : undefined
+    };
+
+    onUpdateProduct(updated);
+    setEditingProduct(null);
+  };
+
+  // Confirm delete product
+  const handleConfirmDeleteProduct = (productId: string) => {
+    const prod = products.find(p => p.id === productId);
+    if (!prod) return;
+    if (window.confirm(`¿Está seguro de eliminar el insumo "${prod.name}" permanentemente del inventario?`)) {
+      onDeleteProduct(productId);
+    }
+  };
+
+  // Open history modal
+  const openHistory = (p: Product) => {
+    setHistoryProduct(p);
   };
 
   // Open stock adjustment modal
@@ -593,16 +667,41 @@ export default function Inventario({
                           {pStock} {p.unitType === 'gr' ? 'g' : p.unitType === 'ml' ? 'ml' : p.unitType === 'l' ? 'l' : 'u.'}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center text-[10px] text-gray-500 font-mono pt-1.5 border-t border-slate-800/40">
-                        <span>Límite Mínimo: {p.minStock} {p.unitType === 'gr' ? 'g' : p.unitType === 'ml' ? 'ml' : p.unitType === 'l' ? 'l' : 'u.'}</span>
-                        {currentUser.role === 'Administrador' && (
+                      <div className="flex flex-col gap-2 pt-1.5 border-t border-slate-800/40">
+                        <div className="flex justify-between items-center text-[10px] text-gray-500 font-mono">
+                          <span>Límite Mínimo: {p.minStock} {p.unitType === 'gr' ? 'g' : p.unitType === 'ml' ? 'ml' : p.unitType === 'l' ? 'l' : 'u.'}</span>
                           <button 
                             type="button"
-                            onClick={() => openAdjustment(p)}
-                            className="bg-slate-900 hover:bg-slate-800 text-white hover:text-cyber-pink transition-all border border-slate-800 px-2.5 py-1 rounded-md text-[9px] font-mono flex items-center gap-1 cursor-pointer"
+                            onClick={() => openHistory(p)}
+                            className="bg-slate-900/60 hover:bg-slate-800 text-gray-305 hover:text-cyan-400 border border-slate-850 px-1.5 py-0.5 rounded text-[8px] font-mono flex items-center gap-0.5 cursor-pointer transition-colors"
                           >
-                            <RefreshCw size={10} /> Ajustar Bodega
+                            <History size={8} /> Ver Historial
                           </button>
+                        </div>
+                        {currentUser.role === 'Administrador' && (
+                          <div className="flex gap-1.5 pt-1">
+                            <button 
+                              type="button"
+                              onClick={() => openAdjustment(p)}
+                              className="flex-1 bg-slate-900 hover:bg-slate-800 text-white hover:text-cyber-pink transition-all border border-slate-850 py-1 rounded text-[8px] font-mono flex items-center justify-center gap-0.5 cursor-pointer"
+                            >
+                              <RefreshCw size={8} /> Ajustar
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleStartEditProduct(p)}
+                              className="flex-1 bg-slate-900 hover:bg-slate-800 text-white hover:text-cyber-blue transition-all border border-slate-850 py-1 rounded text-[8px] font-mono flex items-center justify-center gap-0.5 cursor-pointer"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleConfirmDeleteProduct(p.id)}
+                              className="flex-1 bg-red-950/40 hover:bg-red-900/40 text-red-400 hover:text-red-300 transition-all border border-red-900/30 py-1 rounded text-[8px] font-mono flex items-center justify-center gap-0.5 cursor-pointer"
+                            >
+                              🗑️ Borrar
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1248,80 +1347,230 @@ export default function Inventario({
         </div>
       )}
 
-      {/* OVERLAY / MODAL: IMPORT PRODUCTS */}
-      {showImportModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-cyber-card border border-cyber-border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-[0_0_50px_rgba(6,182,212,0.15)] glow-border-pink">
+      {/* MODAL: Edit Product */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-cyber-card border border-cyber-border rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex justify-between items-center border-b border-cyber-border pb-3">
-              <h3 className="text-sm font-bold font-mono text-white flex items-center gap-2">
-                <Upload size={16} className="text-cyber-blue animate-bounce" />
-                IMPORTAR BASE DE DATOS DE PRODUCTOS
+              <h3 className="text-sm font-bold font-mono text-white flex items-center gap-1.5">
+                <span>✏️</span> EDITAR SUMINISTRO: {editingProduct.name.toUpperCase()}
               </h3>
-              <button onClick={() => { setShowImportModal(false); setImportError(null); }} className="text-gray-400 hover:text-white">
+              <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-white">
                 <X size={16} />
               </button>
             </div>
 
-            <p className="text-[10px] text-gray-400 font-mono leading-relaxed">
-              Cargue un archivo <span className="text-cyber-pink">.json</span> con formato de arreglo de productos, o pegue el contenido JSON directamente en la casilla inferior. El sistema fusionará los datos evitando duplicados por Código.
-            </p>
-
-            <form onSubmit={handleImportProductsSubmit} className="space-y-4 text-xs font-mono">
-              <div className="space-y-1">
-                <label className="text-gray-400 block uppercase text-[9px]">Cargar archivo de respaldo (.json)</label>
-                <input 
-                  type="file" 
-                  accept=".json"
-                  onChange={handleFileChange}
-                  className="w-full bg-slate-900 border border-slate-850 p-2.5 rounded-lg text-white text-xs focus:outline-none file:mr-4 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-cyber-pink file:text-black hover:file:bg-cyber-accent cursor-pointer"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-gray-400 block uppercase text-[9px]">O pegue el contenido JSON aquí:</label>
-                <textarea 
-                  value={importText}
-                  onChange={e => setImportText(e.target.value)}
-                  placeholder='[
-  {
-    "id": "p-import-1",
-    "code": "PROD001",
-    "name": "Tanque de Oxígeno Ultra",
-    "category": "Contenedores",
-    "price": 120,
-    "cost": 50,
-    "stock": 15,
-    "minStock": 5,
-    "imageUrl": "🛢️"
-  }
-]'
-                  className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white font-mono text-[10px] h-32 focus:outline-none"
-                />
-              </div>
-
-              {importError && (
-                <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded-lg text-red-400 text-[10px] flex items-center gap-1.5">
-                  <AlertCircle size={12} />
-                  <span>{importError}</span>
+            <form onSubmit={handleUpdateProductSubmit} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1 col-span-2">
+                  <label className="text-gray-400 font-mono">Descripción del Suministro</label>
+                  <input 
+                    type="text" 
+                    value={editName} 
+                    onChange={e => setEditName(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                    required
+                  />
                 </div>
-              )}
 
-              <div className="flex gap-2 justify-end pt-2">
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Código SKU</label>
+                  <input 
+                    type="text" 
+                    value={editCode} 
+                    onChange={e => setEditCode(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Categoría</label>
+                  <select
+                    value={editCategory}
+                    onChange={e => setEditCategory(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                  >
+                    {(config?.productCategories || ["Contenedores", "Energía", "Químicos", "Dispositivos", "Protección", "Filtros", "Botánica"]).map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Costo de Compra ($)</label>
+                  <input 
+                    type="number" 
+                    value={editCost} 
+                    onChange={e => setEditCost(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Precio de Despacho ($)</label>
+                  <input 
+                    type="number" 
+                    value={editPrice} 
+                    onChange={e => setEditPrice(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Unidad de Venta</label>
+                  <select
+                    value={editUnitType}
+                    onChange={e => setEditUnitType(e.target.value as any)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                  >
+                    <option value="unidad">📦 Por Unidad (U)</option>
+                    <option value="gr">⚖️ Por Gramo (Gr)</option>
+                    <option value="ml">🧪 Por Mililitro (ML)</option>
+                    <option value="l">🍶 Por Litro (L)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-mono">Alerta Stock Mínimo</label>
+                  <input 
+                    type="number" 
+                    step="any"
+                    value={editMinStock} 
+                    onChange={e => setEditMinStock(Math.max(0.1, parseFloat(e.target.value) || 1))}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink"
+                    required
+                  />
+                </div>
+
+                {editUnitType === 'gr' && (
+                  <div className="col-span-2 p-3 bg-slate-900/60 rounded-lg border border-cyber-pink/20 space-y-2.5">
+                    <div className="text-[10px] text-cyber-pink font-bold font-mono tracking-wider uppercase">
+                      PRECIOS ESPECIALES PARA GRAMAJES (OPCIONALES)
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[10px]">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-mono">1 Gr (Símb. 1)</label>
+                        <input 
+                          type="number"
+                          placeholder="P. ej. $5.0"
+                          value={editSpecialPrice1g}
+                          onChange={e => setEditSpecialPrice1g(e.target.value)}
+                          className="w-full bg-cyber-bg border border-cyber-border p-2 rounded text-white text-xs focus:outline-none focus:border-cyber-pink"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-mono">1/2 Gr (Símb. 1/2)</label>
+                        <input 
+                          type="number"
+                          placeholder="P. ej. $3.0"
+                          value={editSpecialPriceHalfG}
+                          onChange={e => setEditSpecialPriceHalfG(e.target.value)}
+                          className="w-full bg-cyber-bg border border-cyber-border p-2 rounded text-white text-xs focus:outline-none focus:border-cyber-pink"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-mono">1/4 Gr (Símb. 1/4)</label>
+                        <input 
+                          type="number"
+                          placeholder="P. ej. $1.8"
+                          value={editSpecialPriceQuarterG}
+                          onChange={e => setEditSpecialPriceQuarterG(e.target.value)}
+                          className="w-full bg-cyber-bg border border-cyber-border p-2 rounded text-white text-xs focus:outline-none focus:border-cyber-pink"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1 col-span-2">
+                  <label className="text-gray-400 font-mono">Emoji / Icono representativo</label>
+                  <input 
+                    type="text" 
+                    value={editEmoji} 
+                    onChange={e => setEditEmoji(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink text-center text-lg"
+                    placeholder="📦"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
                 <button 
                   type="button" 
-                  onClick={() => { setShowImportModal(false); setImportError(null); }}
+                  onClick={() => setEditingProduct(null)}
                   className="bg-slate-900 text-gray-400 px-4 py-2 rounded-lg text-xs"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  className="bg-cyber-blue text-black hover:bg-cyan-400 px-4 py-2 rounded-lg font-bold font-mono text-xs cursor-pointer"
+                  className="bg-cyber-pink text-black hover:bg-cyber-accent px-4 py-2 rounded-lg font-bold font-mono text-xs cursor-pointer neon-shadow-pink"
                 >
-                  Confirmar Importación
+                  Guardar Cambios
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Product History */}
+      {historyProduct && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-cyber-card border border-cyber-border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-cyber-border pb-3">
+              <h3 className="text-sm font-bold font-mono text-white flex items-center gap-1.5">
+                <History size={15} className="text-cyan-400" />
+                HISTORIAL DE MOVIMIENTOS: {historyProduct.name.toUpperCase()}
+              </h3>
+              <button onClick={() => setHistoryProduct(null)} className="text-gray-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+              {adjustments.filter(a => a.productId === historyProduct.id).slice().reverse().map(adj => {
+                const isIngreso = adj.type === 'Ingreso' || adj.type === 'Inventario Inicial';
+                return (
+                  <div key={adj.id} className="bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 space-y-1 text-[11px] font-mono">
+                    <div className="flex justify-between">
+                      <span className="font-bold text-white uppercase text-[10px]">{adj.type}</span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${
+                        isIngreso 
+                          ? 'bg-cyber-green/10 text-cyber-green border border-cyber-green/20' 
+                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                      }`}>
+                        {isIngreso ? `+${adj.quantity}` : `-${adj.quantity}`}
+                      </span>
+                    </div>
+                    <div className="text-gray-400 text-[10px] leading-tight">Concepto: "{adj.reason}"</div>
+                    <div className="flex justify-between text-[9px] text-gray-500 pt-1">
+                      <span>Por: {adj.user}</span>
+                      <span>{new Date(adj.createdAt).toLocaleString()}</span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {adjustments.filter(a => a.productId === historyProduct.id).length === 0 && (
+                <div className="py-6 text-center text-xs text-gray-500 font-mono">
+                  No se registran movimientos para este producto en la bitácora.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setHistoryProduct(null)}
+                className="bg-slate-900 border border-slate-800 text-gray-400 hover:text-white px-4 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer"
+              >
+                Cerrar Historial
+              </button>
+            </div>
           </div>
         </div>
       )}

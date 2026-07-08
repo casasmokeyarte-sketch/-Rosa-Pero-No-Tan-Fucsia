@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shift, Invoice, Expense, User } from '../types';
+import { Shift, Invoice, Expense, User, ClientRequest } from '../types';
 import { 
   Key, 
   Lock, 
@@ -25,6 +25,7 @@ interface CajaJornadaProps {
   currentUser: User;
   onOpenShift: (initialCash: number, user: string) => void;
   onCloseShift: (shiftId: string, actualCash: number, notes: string) => void;
+  clientRequests?: ClientRequest[];
 }
 
 export default function CajaJornada({
@@ -34,7 +35,8 @@ export default function CajaJornada({
   users,
   currentUser,
   onOpenShift,
-  onCloseShift
+  onCloseShift,
+  clientRequests = []
 }: CajaJornadaProps) {
   
   // Find active shift
@@ -54,6 +56,13 @@ export default function CajaJornada({
 
   // Form error
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Forced close states
+  const [showForcedClose, setShowForcedClose] = useState(false);
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminError, setAdminError] = useState('');
+  const [closedShiftReport, setClosedShiftReport] = useState<Shift | null>(null);
 
   // Filter shifts to closed ones for history
   const closedShifts = shifts.filter(s => s.status === 'Cerrada');
@@ -81,8 +90,71 @@ export default function CajaJornada({
   const handleCloseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeShift) return;
+
+    // Check if there are unresolved items
+    const pendingReqs = (clientRequests || []).filter(r => r.status === 'Pendiente' || r.status === 'En Revisión');
+    const pendingDels = invoices.filter(inv => inv.isDelivery && (inv.deliveryStatus === 'Pendiente' || inv.deliveryStatus === 'En Camino'));
+    
+    if (pendingReqs.length > 0 || pendingDels.length > 0) {
+      setErrorMsg("❌ BLOQUEO DE PROTOCOLO: No se puede efectuar el cierre regular de caja mientras existan solicitudes o despachos pendientes.");
+      return;
+    }
+
     onCloseShift(activeShift.id, parseFloat(actualCashInput.toString()), closingNotes);
+    
+    const closedShift: Shift = {
+      ...activeShift,
+      status: 'Cerrada',
+      actualCash: parseFloat(actualCashInput.toString()),
+      discrepancy: parseFloat(actualCashInput.toString()) - activeShift.expectedCash,
+      endTime: new Date().toISOString(),
+      notes: closingNotes
+    };
+    
+    setClosedShiftReport(closedShift);
     setShowClosingModal(false);
+    setErrorMsg(null);
+  };
+
+  // Trigger Admin Forced Shift Close
+  const handleAdminForcedCloseSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeShift) return;
+
+    const admin = users.find(u => u.id === selectedAdminId);
+    if (!admin) {
+      setAdminError("Seleccione un administrador");
+      return;
+    }
+
+    if (admin.role !== 'Administrador') {
+      setAdminError("El usuario seleccionado no cuenta con rol de Administrador Principal");
+      return;
+    }
+
+    if (admin.password !== adminPassword) {
+      setAdminError("Contraseña / PIN de administrador incorrecto");
+      return;
+    }
+
+    const notes = `[CIERRE FORZADO - Autorizado por Administrador ${admin.fullName}] ${closingNotes}`;
+    onCloseShift(activeShift.id, parseFloat(actualCashInput.toString()), notes);
+
+    const closedShift: Shift = {
+      ...activeShift,
+      status: 'Cerrada',
+      actualCash: parseFloat(actualCashInput.toString()),
+      discrepancy: parseFloat(actualCashInput.toString()) - activeShift.expectedCash,
+      endTime: new Date().toISOString(),
+      notes
+    };
+
+    setClosedShiftReport(closedShift);
+    setShowClosingModal(false);
+    setShowForcedClose(false);
+    setSelectedAdminId('');
+    setAdminPassword('');
+    setAdminError('');
     setErrorMsg(null);
   };
 
@@ -432,21 +504,138 @@ export default function CajaJornada({
                 />
               </div>
 
-              <div className="flex gap-2 justify-end pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowClosingModal(false)}
-                  className="bg-slate-900 text-gray-300 px-4 py-2 rounded-lg"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  className="bg-cyber-pink text-black hover:bg-cyber-accent px-4 py-2 rounded-lg font-bold font-mono"
-                >
-                  Cerrar Caja Definitivo
-                </button>
-              </div>
+              {/* Validation Warning block inside closing form */}
+              {(() => {
+                const pendingReqs = (clientRequests || []).filter(r => r.status === 'Pendiente' || r.status === 'En Revisión');
+                const pendingDels = invoices.filter(inv => inv.isDelivery && (inv.deliveryStatus === 'Pendiente' || inv.deliveryStatus === 'En Camino'));
+                const hasPendings = pendingReqs.length > 0 || pendingDels.length > 0;
+
+                return (
+                  <div className="space-y-3 pt-2">
+                    {hasPendings && (
+                      <div className="bg-red-950/40 border border-red-900/40 p-3 rounded-lg text-[10px] text-red-400 space-y-1.5">
+                        <div className="font-bold flex items-center gap-1">
+                          <ShieldAlert size={12} className="shrink-0" />
+                          <span>BLOQUEO DE ARQUEO POR PENDIENTES</span>
+                        </div>
+                        <p className="leading-tight">
+                          No es posible realizar un cierre de caja regular porque existen las siguientes operaciones sin resolver:
+                        </p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-[9px] font-sans">
+                          {pendingReqs.map(r => (
+                            <li key={r.id}>Solicitud #{r.id.slice(0,5).toUpperCase()}: "{r.subject}" ({r.status})</li>
+                          ))}
+                          {pendingDels.map(d => (
+                            <li key={d.id}>Domicilio Factura {d.invoiceNumber}: Dest. {d.guideName} ({d.deliveryStatus})</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {!showForcedClose ? (
+                      <div className="flex gap-2 justify-end pt-2 border-t border-slate-800">
+                        <button 
+                          type="button" 
+                          onClick={() => setShowClosingModal(false)}
+                          className="bg-slate-900 text-gray-300 px-4 py-2 rounded-lg text-[10px] font-bold font-mono cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        {!hasPendings ? (
+                          <button 
+                            type="submit" 
+                            className="bg-cyber-pink text-black hover:bg-cyber-accent px-4 py-2 rounded-lg font-bold font-mono text-[10px] cursor-pointer neon-shadow-pink"
+                          >
+                            Cerrar Caja Regular
+                          </button>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => setShowForcedClose(true)}
+                            className="bg-cyber-orange text-black hover:bg-amber-400 px-4 py-2 rounded-lg font-bold font-mono text-[10px] cursor-pointer neon-shadow-orange flex items-center gap-1"
+                          >
+                            🔑 Cierre Forzado Admin
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-cyber-card border border-cyber-border rounded-xl p-4 space-y-3 pt-3 border-t-2 border-t-cyber-orange">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-[10px] font-extrabold text-cyber-orange font-mono uppercase tracking-wider flex items-center gap-1">
+                            🔑 AUTORIZACIÓN DE CIERRE FORZADO
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowForcedClose(false);
+                              setAdminPassword('');
+                              setAdminError('');
+                            }}
+                            className="text-gray-500 hover:text-white text-[9px] uppercase font-mono"
+                          >
+                            Volver
+                          </button>
+                        </div>
+
+                        {adminError && (
+                          <div className="bg-red-950/30 border border-red-900/50 p-2 rounded text-red-400 text-[9px] font-mono leading-tight">
+                            {adminError}
+                          </div>
+                        )}
+
+                        <div className="space-y-2 text-[10px]">
+                          <div className="space-y-0.5">
+                            <label className="text-gray-500 font-mono">ADMINISTRADOR:</label>
+                            <select
+                              value={selectedAdminId}
+                              onChange={e => setSelectedAdminId(e.target.value)}
+                              className="bg-cyber-bg border border-cyber-border text-white text-[10px] p-1.5 rounded w-full focus:outline-none font-mono"
+                            >
+                              <option value="">-- Seleccionar Administrador --</option>
+                              {users.filter(u => u.role === 'Administrador').map(u => (
+                                <option key={u.id} value={u.id}>{u.fullName}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-0.5">
+                            <label className="text-gray-500 font-mono">CONTRASEÑA / PIN ADMIN:</label>
+                            <input
+                              type="password"
+                              placeholder="Ingrese contraseña de administrador"
+                              value={adminPassword}
+                              onChange={e => setAdminPassword(e.target.value)}
+                              className="bg-cyber-bg border border-cyber-border text-white text-[10px] p-1.5 rounded w-full focus:outline-none text-center font-mono font-bold"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowForcedClose(false);
+                              setAdminPassword('');
+                              setAdminError('');
+                            }}
+                            className="flex-1 py-1.5 bg-slate-900 border border-slate-800 text-gray-400 rounded text-[9px] font-bold font-mono cursor-pointer"
+                          >
+                            Atrás
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAdminForcedCloseSubmit}
+                            className="flex-1 py-1.5 bg-cyber-orange text-black hover:bg-amber-400 rounded text-[9px] font-bold font-mono cursor-pointer neon-shadow-orange"
+                          >
+                            Autorizar Cierre
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
             </form>
           </div>
         </div>
@@ -614,6 +803,179 @@ export default function CajaJornada({
               <button
                 type="button"
                 onClick={() => setSelectedAuditShift(null)}
+                className="flex-1 bg-red-600 text-white hover:bg-red-700 p-2 rounded font-bold flex items-center justify-center cursor-pointer font-mono"
+              >
+                Cerrar Acta
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* OVERLAY MODAL: DISPLAY SPECIFIC CLOSED SHIFT PRINT REPORT (THERMAL TICKET) */}
+      {closedShiftReport && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+          <div className="bg-white text-black p-6 rounded-2xl max-w-sm w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card space-y-4">
+            
+            <div className="flex justify-between items-center border-b border-black pb-2 no-print">
+              <span className="font-bold text-black uppercase text-[10px]">REPORTE DE CIERRE DE CAJA</span>
+              <button 
+                onClick={() => setClosedShiftReport(null)}
+                className="text-gray-500 hover:text-black p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Print Layout Header */}
+            <div className="text-center space-y-1 pb-4 border-b border-black">
+              <h3 className="text-sm font-extrabold uppercase tracking-tight">Rosa Fuerte</h3>
+              <p className="text-[10px]">Pero NO Tan Fucsia</p>
+              <p className="text-[10px]">COMPROBANTE OFICIAL DE CIERRE DE JORNADA</p>
+              <p className="text-[9px] text-gray-500 mt-1">ID Turno: {closedShiftReport.id}</p>
+            </div>
+
+            {/* Audit metrics table */}
+            <div className="space-y-1.5 py-2 border-b border-black text-[10px]">
+              <div className="flex justify-between">
+                <span>OPERADOR / CAJERO:</span>
+                <span className="font-bold uppercase">{closedShiftReport.user}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>HORA INICIO:</span>
+                <span>{new Date(closedShiftReport.startTime).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>HORA CIERRE:</span>
+                <span>{new Date(closedShiftReport.endTime || '').toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-black pt-1.5 mt-1.5">
+                <span>FONDO INICIAL CAJA:</span>
+                <span>${closedShiftReport.initialCash.toFixed(0)} COP</span>
+              </div>
+              <div className="flex justify-between text-green-700 font-bold">
+                <span>(+) VENTAS EFECTIVO:</span>
+                <span>+${closedShiftReport.salesCash.toFixed(0)} COP</span>
+              </div>
+              <div className="flex justify-between text-red-600 font-bold">
+                <span>(-) GASTOS DEL TURNO:</span>
+                <span>-${closedShiftReport.expensesTotal.toFixed(0)} COP</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-black pt-1 mt-1">
+                <span>(=) SALDO EFECTIVO ESPERADO:</span>
+                <span>${closedShiftReport.expectedCash.toFixed(0)} COP</span>
+              </div>
+              <div className="flex justify-between font-bold text-blue-700">
+                <span>(=) EFECTIVO FÍSICO ARQUEADO:</span>
+                <span>${closedShiftReport.actualCash?.toFixed(0)} COP</span>
+              </div>
+              <div className={`flex justify-between font-extrabold text-[11px] border-t border-black pt-1 mt-1 ${
+                (closedShiftReport.discrepancy || 0) === 0 ? 'text-green-700' : 'text-red-600'
+              }`}>
+                <span>(=) DESCUADRE (DIFERENCIA):</span>
+                <span>${(closedShiftReport.discrepancy || 0).toFixed(0)} COP</span>
+              </div>
+            </div>
+
+            {/* Cashier user actions details */}
+            <div className="space-y-2 border-b border-black pb-3">
+              <p className="font-bold uppercase text-[9px]">FACTURAS EXPEDIDAS EN EL TURNO:</p>
+              
+              <table className="w-full text-left text-[9px] border-collapse">
+                <thead>
+                  <tr className="border-b border-black font-bold">
+                    <th>Factura</th>
+                    <th>Cliente</th>
+                    <th>Pago</th>
+                    <th className="text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {getShiftInvoices(closedShiftReport.user, closedShiftReport.startTime, closedShiftReport.endTime).map(inv => (
+                    <tr key={inv.id}>
+                      <td className="py-1 font-bold">{inv.invoiceNumber}</td>
+                      <td className="py-1 truncate max-w-[100px]">{inv.clientName}</td>
+                      <td className="py-1">{inv.paymentMethod}</td>
+                      <td className="py-1 text-right font-bold">${inv.total.toFixed(0)} COP</td>
+                    </tr>
+                  ))}
+                  {getShiftInvoices(closedShiftReport.user, closedShiftReport.startTime, closedShiftReport.endTime).length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-2 text-center text-gray-500">
+                        Ninguna factura expedida en este turno.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Expenses section under this shift */}
+            <div className="space-y-2 border-b border-black pb-3">
+              <p className="font-bold uppercase text-[9px]">GASTOS DEDUCIDOS DE CAJA:</p>
+              
+              <table className="w-full text-left text-[9px] border-collapse">
+                <thead>
+                  <tr className="border-b border-black font-bold">
+                    <th>Categoría</th>
+                    <th>Motivo</th>
+                    <th className="text-right">Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {getShiftExpenses(closedShiftReport.user, closedShiftReport.startTime, closedShiftReport.endTime).map(exp => (
+                    <tr key={exp.id}>
+                      <td className="py-1 font-bold">{exp.category}</td>
+                      <td className="py-1 truncate max-w-[130px]">{exp.description}</td>
+                      <td className="py-1 text-right font-bold">-${exp.amount.toFixed(0)} COP</td>
+                    </tr>
+                  ))}
+                  {getShiftExpenses(closedShiftReport.user, closedShiftReport.startTime, closedShiftReport.endTime).length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-2 text-center text-gray-500">
+                        Ningún gasto deducido en este turno.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Observations footer */}
+            <div className="text-[9px] space-y-1">
+              <span className="font-bold uppercase">Observaciones / Bitácora Cierre:</span>
+              <p className="text-gray-750 bg-gray-50 p-2 rounded border leading-relaxed">
+                {closedShiftReport.notes || 'Cierre de jornada completado sin observaciones.'}
+              </p>
+            </div>
+
+            {/* Signatures */}
+            <div className="pt-10 grid grid-cols-2 gap-4 text-center text-[9px]">
+              <div>
+                <div className="border-t border-black w-20 mx-auto"></div>
+                <p className="mt-1 font-bold uppercase">{closedShiftReport.user}</p>
+                <p className="text-[7px] text-gray-500">Cajero</p>
+              </div>
+              <div>
+                <div className="border-t border-black w-20 mx-auto"></div>
+                <p className="mt-1 font-bold">CONTROL CONTABLE</p>
+                <p className="text-[7px] text-gray-500">Auditor de Caja</p>
+              </div>
+            </div>
+
+            {/* Action buttons inside overlay */}
+            <div className="flex gap-2 pt-4 border-t border-gray-300 no-print">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex-1 bg-black text-white hover:bg-slate-900 p-2 rounded font-bold flex items-center justify-center gap-1 cursor-pointer font-mono"
+              >
+                <Printer size={13} /> Imprimir Acta
+              </button>
+              <button
+                type="button"
+                onClick={() => setClosedShiftReport(null)}
                 className="flex-1 bg-red-600 text-white hover:bg-red-700 p-2 rounded font-bold flex items-center justify-center cursor-pointer font-mono"
               >
                 Cerrar Acta

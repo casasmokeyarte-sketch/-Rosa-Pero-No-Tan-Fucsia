@@ -103,7 +103,7 @@ export default function Clientes({
       creditLimit: parseFloat(clientCreditLimit.toString()) || 1000,
       outstandingBalance: 0,
       createdAt: new Date().toISOString(),
-      password: clientPassword.trim() || '1234'
+      password: clientPassword.trim()
     };
 
     onAddClient(newClient);
@@ -148,7 +148,8 @@ export default function Clientes({
       phone: clientPhone,
       address: clientAddress,
       creditLimit: parseFloat(clientCreditLimit.toString()),
-      password: clientPassword.trim() || editingClient.password || '1234'
+      outstandingBalance: editingClient.outstandingBalance,
+      password: clientPassword.trim() || editingClient.password || ''
     };
 
     onUpdateClient(updated);
@@ -627,15 +628,16 @@ export default function Clientes({
               <div className="space-y-1">
                 <label className="text-gray-400 font-mono flex items-center gap-1">
                   Contraseña del Portal Cliente
-                  <span className="text-gray-600 text-[9px]">(vacío = 1234)</span>
+                  <span className="text-red-500 text-[9px]">* (Requerido)</span>
                 </label>
                 <div className="relative">
                   <input
                     type={showClientPwd ? 'text' : 'password'}
                     value={clientPassword}
                     onChange={e => setClientPassword(e.target.value)}
-                    placeholder="Contraseña de acceso al portal..."
+                    placeholder="Defina una clave de acceso al portal de cliente..."
                     className="w-full bg-cyber-bg border border-cyber-border p-2.5 pr-9 rounded-lg text-white text-xs focus:outline-none glow-border-pink tracking-wide font-mono"
+                    required
                   />
                   <button
                     type="button"
@@ -770,7 +772,7 @@ export default function Clientes({
               <div className="space-y-1">
                 <label className="text-gray-400 font-mono flex items-center gap-1">
                   Contraseña del Portal Cliente
-                  <span className="text-gray-600 text-[9px]">(vacío conserva la actual)</span>
+                  <span className="text-gray-600 text-[9px]">(vacío conserva la clave actual)</span>
                 </label>
                 <div className="relative">
                   <input

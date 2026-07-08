@@ -309,13 +309,18 @@ export default function App() {
 
   // Forgot password form states
   const [forgotRut, setForgotRut] = useState('');
+  const [forgotContact, setForgotContact] = useState('');
+  const [forgotCodeGenerated, setForgotCodeGenerated] = useState('');
+  const [forgotCodeInput, setForgotCodeInput] = useState('');
+  const [forgotStage, setForgotStage] = useState<'input_identity' | 'verify_code' | 'reset_password'>('input_identity');
+  const [forgotClientId, setForgotClientId] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
   const [showForgotNewPwd, setShowForgotNewPwd] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState(false);
 
   // Login panel form states
-  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -546,8 +551,8 @@ export default function App() {
       return;
     }
 
-    const expectedPassword = user.password || '1234';
-    const isCorrect = loginPassword === expectedPassword || (user.username === 'admin' && loginPassword === '1234');
+    const expectedPassword = user.password;
+    const isCorrect = user.password && loginPassword === expectedPassword;
     if (isCorrect) {
       setCurrentUser(user);
       setIsAuthenticated(true);
@@ -570,52 +575,88 @@ export default function App() {
       return;
     }
 
-    const expectedPassword = clientToLogin.password || '1234';
-    if (clientLoginPassword === expectedPassword) {
+    const expectedPassword = clientToLogin.password;
+    if (expectedPassword && clientLoginPassword === expectedPassword) {
       setCurrentClient(clientToLogin);
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
     } else {
-      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida.");
+      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida o contraseña no establecida.");
+    }
+  };
+
+  const handleForgotSendCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+
+    if (!forgotRut.trim()) {
+      setLoginError("Ingresa tu NIT/RUT registrado.");
+      return;
+    }
+    if (!forgotContact.trim()) {
+      setLoginError("Ingresa tu Correo o Teléfono registrado.");
+      return;
+    }
+
+    const found = clients.find(
+      c => (c.rut.trim().toLowerCase() === forgotRut.trim().toLowerCase() || c.phone.trim() === forgotRut.trim()) &&
+           (c.email.trim().toLowerCase() === forgotContact.trim().toLowerCase() || c.phone.trim() === forgotContact.trim())
+    );
+
+    if (!found) {
+      setLoginError("IDENTIDAD NO COMPROBADA: El NIT/RUT y contacto no coinciden con ninguna cuenta.");
+      return;
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setForgotCodeGenerated(code);
+    setForgotClientId(found.id);
+    setForgotStage('verify_code');
+    setLoginError(null);
+
+    // Simulate code delivery via System Toast Notice
+    showToast(`🔒 CÓDIGO DE RECUPERACIÓN (Simulado): ${code}`, "warning");
+  };
+
+  const handleForgotVerifyCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+
+    if (forgotCodeInput.trim() === forgotCodeGenerated) {
+      setForgotStage('reset_password');
+    } else {
+      setLoginError("CÓDIGO INCORRECTO: El código de seguridad ingresado es inválido.");
     }
   };
 
   const handleForgotPasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
-    setForgotSuccess(false);
 
-    if (!forgotRut.trim()) {
-      setLoginError("Ingresa tu NIT/RUT registrado.");
-      return;
-    }
     if (!forgotNewPassword.trim()) {
       setLoginError("La nueva contraseña no puede estar vacía.");
       return;
     }
     if (forgotNewPassword !== forgotConfirmPassword) {
-      setLoginError("Las contraseñas no coinciden. Verifica e intenta de nuevo.");
+      setLoginError("Las contraseñas no coinciden.");
       return;
     }
 
-    const found = clients.find(
-      c => c.rut.trim().toLowerCase() === forgotRut.trim().toLowerCase() ||
-           c.phone.trim() === forgotRut.trim()
-    );
-    if (!found) {
-      setLoginError("NIT/RUT o Teléfono no encontrado en el sistema. Contacta al administrador.");
-      return;
-    }
-
-    setClients(prev => prev.map(c => c.id === found.id ? { ...c, password: forgotNewPassword.trim() } : c));
+    setClients(prev => prev.map(c => c.id === forgotClientId ? { ...c, password: forgotNewPassword.trim() } : c));
     setForgotSuccess(true);
-    setForgotRut('');
-    setForgotNewPassword('');
-    setForgotConfirmPassword('');
+    
     setTimeout(() => {
       setForgotSuccess(false);
       setShowForgotPasswordForm(false);
+      setForgotStage('input_identity');
+      setForgotRut('');
+      setForgotContact('');
+      setForgotCodeGenerated('');
+      setForgotCodeInput('');
+      setForgotClientId('');
+      setForgotNewPassword('');
+      setForgotConfirmPassword('');
       setLoginError(null);
     }, 2500);
   };
@@ -1033,6 +1074,17 @@ export default function App() {
     setProducts(prev => [...prev, product]);
     showToast(`Insumo '${product.name}' catalogado con éxito`, "success");
     if (isSupabaseEnabled) syncUpsert('products', product);
+  };
+
+  const handleUpdateProduct = (product: Product) => {
+    setProducts(prev => prev.map(p => p.id === product.id ? product : p));
+    showToast(`Insumo '${product.name}' actualizado con éxito`, "success");
+    if (isSupabaseEnabled) syncUpsert('products', product);
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    setProducts(prev => prev.filter(p => p.id !== productId));
+    showToast(`Insumo eliminado del inventario con éxito`, "warning");
   };
 
   const handleImportProducts = (imported: Product[]) => {
@@ -1554,7 +1606,7 @@ export default function App() {
                       setLoginPassword(e.target.value);
                       setLoginError(null);
                     }}
-                    placeholder="Clave (Ej: admin o 1234)..."
+                    placeholder="Ingrese su contraseña..."
                     className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 pr-10 rounded-lg w-full focus:outline-none glow-border-pink tracking-widest font-mono"
                     required
                   />
@@ -1613,7 +1665,7 @@ export default function App() {
                     <div className="relative">
                       <input 
                         type={showClientPassword ? "text" : "password"} 
-                        placeholder="Contraseña (Por defecto: 1234)..."
+                        placeholder="Ingrese su contraseña..."
                         value={clientLoginPassword}
                         onChange={e => {
                           setClientLoginPassword(e.target.value);
@@ -1661,89 +1713,177 @@ export default function App() {
                 </form>
               ) : (
                 /* FORGOT PASSWORD FORM */
-                <form onSubmit={handleForgotPasswordSubmit} className="space-y-4 font-mono text-xs">
+                <div className="space-y-4 font-mono text-xs">
                   <div className="text-center space-y-0.5 pb-1">
                     <h3 className="text-[11px] font-extrabold text-cyber-pink uppercase tracking-widest">Restablecer Contraseña</h3>
-                    <p className="text-[9px] text-gray-500">Ingresa tu NIT/RUT y establece una nueva clave</p>
+                    <p className="text-[9px] text-gray-500">Comprobación de Seguridad de Datos</p>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">NIT / RUT registrado:</label>
-                    <input
-                      type="text"
-                      placeholder="Ej: 901.442.111-4"
-                      value={forgotRut}
-                      onChange={e => { setForgotRut(e.target.value); setLoginError(null); }}
-                      className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink font-mono"
-                      required
-                    />
-                  </div>
+                  {forgotStage === 'input_identity' && (
+                    <form onSubmit={handleForgotSendCode} className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">NIT / RUT registrado:</label>
+                        <input
+                          type="text"
+                          placeholder="Ej: 901.442.111-4"
+                          value={forgotRut}
+                          onChange={e => { setForgotRut(e.target.value); setLoginError(null); }}
+                          className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink font-mono"
+                          required
+                        />
+                      </div>
 
-                  <div className="space-y-1 relative">
-                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">Nueva Contraseña:</label>
-                    <div className="relative">
-                      <input
-                        type={showForgotNewPwd ? "text" : "password"}
-                        placeholder="Escribe tu nueva contraseña..."
-                        value={forgotNewPassword}
-                        onChange={e => { setForgotNewPassword(e.target.value); setLoginError(null); }}
-                        className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 pr-10 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowForgotNewPwd(p => !p)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white cursor-pointer"
-                      >
-                        {showForgotNewPwd ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">Correo o Teléfono registrado:</label>
+                        <input
+                          type="text"
+                          placeholder="ejemplo@correo.com o 3110000000"
+                          value={forgotContact}
+                          onChange={e => { setForgotContact(e.target.value); setLoginError(null); }}
+                          className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink font-sans"
+                          required
+                        />
+                      </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">Confirmar Contraseña:</label>
-                    <input
-                      type="password"
-                      placeholder="Repite la nueva contraseña..."
-                      value={forgotConfirmPassword}
-                      onChange={e => { setForgotConfirmPassword(e.target.value); setLoginError(null); }}
-                      className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
-                      required
-                    />
-                  </div>
+                      {loginError && (
+                        <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded text-red-400 text-[10px] leading-relaxed font-sans">
+                          🚨 {loginError}
+                        </div>
+                      )}
 
-                  {loginError && (
-                    <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded text-red-400 text-[10px] leading-relaxed font-sans">
-                      🚨 {loginError}
-                    </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="submit"
+                          className="py-2.5 rounded-lg bg-cyber-pink text-black hover:bg-cyber-accent font-bold font-mono text-[10px] transition-all cursor-pointer"
+                        >
+                          ENVIAR CÓDIGO
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowForgotPasswordForm(false);
+                            setForgotStage('input_identity');
+                            setForgotRut('');
+                            setForgotContact('');
+                            setLoginError(null);
+                          }}
+                          className="py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-gray-400 hover:text-white font-bold font-mono text-[10px] transition-all cursor-pointer"
+                        >
+                          REGRESAR
+                        </button>
+                      </div>
+                    </form>
                   )}
 
-                  {forgotSuccess && (
-                    <div className="bg-cyber-green/10 border border-cyber-green/30 p-2.5 rounded text-cyber-green text-[10px] text-center font-mono">
-                      ✅ ¡Contraseña actualizada! Redirigiendo al inicio de sesión...
-                    </div>
+                  {forgotStage === 'verify_code' && (
+                    <form onSubmit={handleForgotVerifyCode} className="space-y-4">
+                      <div className="bg-cyber-blue/10 border border-cyber-blue/30 p-3 rounded-lg text-cyber-blue text-[9px] leading-normal font-sans">
+                        Se ha generado un código de verificación de 6 dígitos. Por favor, ingréselo a continuación para confirmar su autenticidad.
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono text-center">Código de Verificación:</label>
+                        <input
+                          type="text"
+                          placeholder="######"
+                          value={forgotCodeInput}
+                          onChange={e => { setForgotCodeInput(e.target.value); setLoginError(null); }}
+                          className="bg-cyber-bg border border-cyber-border text-white text-sm p-3 rounded-lg w-full text-center tracking-widest font-mono font-bold focus:outline-none glow-border-pink"
+                          required
+                          maxLength={6}
+                        />
+                      </div>
+
+                      {loginError && (
+                        <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded text-red-400 text-[10px] leading-relaxed font-sans">
+                          🚨 {loginError}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="submit"
+                          className="py-2.5 rounded-lg bg-cyber-pink text-black hover:bg-cyber-accent font-bold font-mono text-[10px] transition-all cursor-pointer"
+                        >
+                          VERIFICAR CÓDIGO
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotStage('input_identity');
+                            setForgotCodeInput('');
+                            setLoginError(null);
+                          }}
+                          className="py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-gray-400 hover:text-white font-bold font-mono text-[10px] transition-all cursor-pointer"
+                        >
+                          ATRÁS
+                        </button>
+                      </div>
+                    </form>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      type="submit"
-                      className="py-2.5 rounded-lg bg-cyber-pink text-black hover:bg-cyber-accent font-bold font-mono text-[10px] transition-all cursor-pointer"
-                    >
-                      CAMBIAR CONTRASEÑA
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowForgotPasswordForm(false); setLoginError(null); setForgotRut(''); setForgotNewPassword(''); setForgotConfirmPassword(''); }}
-                      className="py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-gray-400 hover:text-white font-bold font-mono text-[10px] transition-all cursor-pointer"
-                    >
-                      REGRESAR
-                    </button>
-                  </div>
-                </form>
+                  {forgotStage === 'reset_password' && (
+                    <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                      <div className="space-y-1 relative">
+                        <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">Nueva Contraseña:</label>
+                        <div className="relative">
+                          <input
+                            type={showForgotNewPwd ? "text" : "password"}
+                            placeholder="Escribe tu nueva contraseña..."
+                            value={forgotNewPassword}
+                            onChange={e => { setForgotNewPassword(e.target.value); setLoginError(null); }}
+                            className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 pr-10 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowForgotNewPwd(p => !p)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white cursor-pointer"
+                          >
+                            {showForgotNewPwd ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono">Confirmar Contraseña:</label>
+                        <input
+                          type="password"
+                          placeholder="Repite la nueva contraseña..."
+                          value={forgotConfirmPassword}
+                          onChange={e => { setForgotConfirmPassword(e.target.value); setLoginError(null); }}
+                          className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
+                          required
+                        />
+                      </div>
+
+                      {loginError && (
+                        <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded text-red-400 text-[10px] leading-relaxed font-sans">
+                          🚨 {loginError}
+                        </div>
+                      )}
+
+                      {forgotSuccess && (
+                        <div className="bg-cyber-green/10 border border-cyber-green/30 p-2.5 rounded text-cyber-green text-[10px] text-center font-mono">
+                          ✅ ¡Contraseña actualizada! Redirigiendo al inicio de sesión...
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 gap-2 pt-1">
+                        <button
+                          type="submit"
+                          className="w-full py-2.5 rounded-lg bg-cyber-pink text-black hover:bg-cyber-accent font-bold font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
+                        >
+                          CAMBIAR CONTRASEÑA
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -2044,6 +2184,7 @@ export default function App() {
               onAddInvoice={handleAddInvoice}
               onAddClient={handleAddClient}
               discounts={discounts}
+              users={users}
             />
           )}
 
@@ -2088,6 +2229,8 @@ export default function App() {
               onAddTransfer={handleAddTransfer}
               onUpdateTransferStatus={handleUpdateTransferStatus}
               users={users}
+              onUpdateProduct={handleUpdateProduct}
+              onDeleteProduct={handleDeleteProduct}
             />
           )}
 
@@ -2100,6 +2243,7 @@ export default function App() {
               currentUser={currentUser}
               onOpenShift={handleOpenShift}
               onCloseShift={handleCloseShift}
+              clientRequests={clientRequests}
             />
           )}
 

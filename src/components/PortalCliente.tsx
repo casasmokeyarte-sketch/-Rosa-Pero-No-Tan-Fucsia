@@ -181,9 +181,15 @@ export default function PortalCliente({
 
   // Cart math
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
-  const cartTax = parseFloat((cartSubtotal * (config.taxRate / 100)).toFixed(2));
+  const cartTax = 0; // IVA de 19% eliminado para compras web
   const deliveryCost = deliveryMethod === 'oficina' ? 15000.00 : 0.00; // Surcharge only applies if delivery is by office
-  const cartTotal = cartSubtotal + cartTax + deliveryCost;
+
+  // Dynamic card payment fee
+  const cardFee = config.cardFeeEnabled && paymentOption === 'bold'
+    ? parseFloat(((cartSubtotal + deliveryCost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2))
+    : 0;
+
+  const cartTotal = cartSubtotal + cartTax + deliveryCost + cardFee;
 
   // 1. Pre-generate order number when entering checkout step 3 (payment)
   useEffect(() => {
@@ -262,14 +268,17 @@ export default function PortalCliente({
               productName: item.product.name,
               price: item.product.price,
               quantity: item.quantity,
-              taxAmount: parseFloat((item.product.price * item.quantity * (config.taxRate / 100)).toFixed(2)),
+              taxAmount: 0,
               total: item.product.price * item.quantity
             }));
             
             const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
-            const tax = parseFloat((subtotal * (config.taxRate / 100)).toFixed(2));
+            const tax = 0;
             const cost = pending.deliveryMethod === 'oficina' ? 15000.00 : 0.00;
-            const total = subtotal + tax + cost;
+            
+            // Recompute card fee on callback restoration
+            const fee = config.cardFeeEnabled ? parseFloat(((subtotal + cost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2)) : 0;
+            const total = subtotal + tax + cost + fee;
 
             const newInvoice: Invoice = {
               id: `inv-client-${Date.now()}`,
@@ -280,8 +289,8 @@ export default function PortalCliente({
               items: invoiceItems,
               subtotal: subtotal,
               discount: 0,
-              taxRate: config.taxRate,
-              taxAmount: tax,
+              taxRate: 0,
+              taxAmount: 0,
               total: total,
               paymentMethod: 'Bold',
               paymentStatus: 'Pagado',
@@ -290,11 +299,12 @@ export default function PortalCliente({
               cashierName: 'Portal Online',
               isDelivery: pending.deliveryMethod !== 'recoge',
               deliveryFee: cost,
-              deliveryRider: pending.deliveryMethod === 'recoge' ? 'N/A' : (pending.deliveryMethod === 'cliente' ? 'Asignado por Cliente' : 'Por Asignar'),
+              deliveryRider: pending.deliveryMethod === 'recoge' ? 'N/A' : (pending.deliveryMethod === 'cliente' ? 'Asignado por Client' : 'Por Asignar'),
               deliveryTransport: pending.deliveryMethod === 'recoge' ? 'N/A' : pending.deliveryTransport,
               deliveryStatus: 'Pendiente',
               deliveryMethod: pending.deliveryMethod,
-              guideAddress: pending.deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : pending.deliveryAddress
+              guideAddress: pending.deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : pending.deliveryAddress,
+              cardFee: fee > 0 ? fee : undefined
             };
 
             onAddInvoice(newInvoice);
@@ -388,7 +398,7 @@ Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en o
       productName: item.product.name,
       price: item.product.price,
       quantity: item.quantity,
-      taxAmount: parseFloat((item.product.price * item.quantity * (config.taxRate / 100)).toFixed(2)),
+      taxAmount: 0,
       total: item.product.price * item.quantity
     }));
 
@@ -403,8 +413,8 @@ Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en o
       items: invoiceItems,
       subtotal: cartSubtotal,
       discount: 0,
-      taxRate: config.taxRate,
-      taxAmount: cartTax,
+      taxRate: 0,
+      taxAmount: 0,
       total: cartTotal,
       paymentMethod: method,
       paymentStatus: status,
@@ -417,7 +427,8 @@ Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en o
       deliveryTransport: deliveryMethod === 'recoge' ? 'N/A' : deliveryTransport,
       deliveryStatus: 'Pendiente',
       deliveryMethod: deliveryMethod,
-      guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress
+      guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress,
+      cardFee: cardFee > 0 ? cardFee : undefined
     };
 
     onAddInvoice(newInvoice);
@@ -1103,13 +1114,19 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                               <span className="text-white">${cartSubtotal.toLocaleString('es-CO')} COP</span>
                             </div>
                             <div className="flex justify-between">
-                              <span>IVA ({config.taxRate}%):</span>
-                              <span className="text-white">${cartTax.toLocaleString('es-CO')} COP</span>
+                              <span>IVA (0%):</span>
+                              <span className="text-white">$0 COP</span>
                             </div>
                             {deliveryMethod === 'oficina' && (
                               <div className="flex justify-between text-cyber-orange">
                                 <span>Recargo Domicilio:</span>
                                 <span className="font-bold">+$15.000 COP</span>
+                              </div>
+                            )}
+                            {config.cardFeeEnabled && paymentOption === 'bold' && (
+                              <div className="flex justify-between text-cyber-pink">
+                                <span>Comisión Tarjeta ({config.cardFeePercentage}%):</span>
+                                <span className="font-bold">+${cardFee.toLocaleString('es-CO')} COP</span>
                               </div>
                             )}
                             <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">

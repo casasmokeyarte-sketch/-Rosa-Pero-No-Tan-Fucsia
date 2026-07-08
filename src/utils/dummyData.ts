@@ -10,7 +10,9 @@ export const INITIAL_BUSINESS_CONFIG: BusinessConfig = {
   taxRate: 19, // 19% IVA standard
   currency: "COP",
   paymentMethods: ["Efectivo", "Tarjeta", "Crédito"],
-  productCategories: ["Contenedores", "Energía", "Químicos", "Dispositivos", "Protección", "Filtros", "Botánica", "Otros"]
+  productCategories: ["Contenedores", "Energía", "Químicos", "Dispositivos", "Protección", "Filtros", "Botánica", "Otros"],
+  cardFeePercentage: 5,
+  cardFeeEnabled: true
 };
 
 export const INITIAL_USERS: User[] = [
@@ -47,6 +49,7 @@ export const INITIAL_USERS: User[] = [
       abonar_cartera: true,
       modificar_configuracion: true,
       gestionar_usuarios: true,
+      autorizar_descuentos: true,
       imprimir_facturas: true,
       editar_facturas: true,
       eliminar_facturas: true,
@@ -68,7 +71,7 @@ export const INITIAL_USERS: User[] = [
     fullName: "Agente Neon-Pink", 
     role: "Cajero", 
     status: "Activo", 
-    password: "1234",
+    password: "neonpink",
     permissions: {
       dashboard: true,
       facturacion: true,
@@ -95,6 +98,7 @@ export const INITIAL_USERS: User[] = [
       abonar_cartera: false,
       modificar_configuracion: false,
       gestionar_usuarios: false,
+      autorizar_descuentos: false,
       imprimir_facturas: true,
       editar_facturas: false,
       eliminar_facturas: false,
@@ -116,7 +120,7 @@ export const INITIAL_USERS: User[] = [
     fullName: "Mensajero Reactor", 
     role: "Cajero", 
     status: "Activo", 
-    password: "1234",
+    password: "reactor",
     permissions: {
       dashboard: true,
       facturacion: true,
@@ -143,6 +147,7 @@ export const INITIAL_USERS: User[] = [
       abonar_cartera: false,
       modificar_configuracion: false,
       gestionar_usuarios: false,
+      autorizar_descuentos: false,
       imprimir_facturas: true,
       editar_facturas: false,
       eliminar_facturas: false,

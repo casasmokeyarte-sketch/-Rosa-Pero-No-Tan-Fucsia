@@ -94,6 +94,8 @@ export default function Configuraciones({
   const [email, setEmail] = useState(config.email);
   const [prefix, setPrefix] = useState(config.invoicePrefix);
   const [taxRate, setTaxRate] = useState(config.taxRate);
+  const [cardFeePercentage, setCardFeePercentage] = useState(config.cardFeePercentage || 0);
+  const [cardFeeEnabled, setCardFeeEnabled] = useState(config.cardFeeEnabled || false);
   
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -133,6 +135,7 @@ export default function Configuraciones({
       abonar_cartera: isAdmin,
       modificar_configuracion: isAdmin,
       gestionar_usuarios: isAdmin,
+      autorizar_descuentos: isAdmin,
       // Acciones detalladas por módulo
       imprimir_facturas: true,
       editar_facturas: isAdmin,
@@ -352,7 +355,9 @@ export default function Configuraciones({
       phone,
       email,
       invoicePrefix: prefix,
-      taxRate: parseFloat(taxRate.toString()) || 0
+      taxRate: parseFloat(taxRate.toString()) || 0,
+      cardFeePercentage: parseFloat(cardFeePercentage.toString()) || 0,
+      cardFeeEnabled
     });
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -369,7 +374,7 @@ export default function Configuraciones({
         username: username.toLowerCase().trim(),
         fullName,
         role,
-        password: password.trim() || '1234',
+        password: password.trim() || selectedEditUser.password || '',
         permissions
       };
       onUpdateUser(updatedUser);
@@ -381,7 +386,7 @@ export default function Configuraciones({
         fullName,
         role,
         status: 'Activo',
-        password: password.trim() || '1234',
+        password: password.trim(),
         permissions
       };
       onAddUser(nUser);
@@ -653,6 +658,37 @@ export default function Configuraciones({
                   onChange={e => setTaxRate(parseFloat(e.target.value) || 0)}
                   className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
                   required
+                />
+              </div>
+
+              <div className="space-y-1 p-2.5 rounded bg-slate-900 border border-slate-800 flex items-center justify-between col-span-2 sm:col-span-1">
+                <div>
+                  <p className="font-bold text-gray-200">Recargo por Tarjeta</p>
+                  <p className="text-[9px] text-gray-500">Cobro de comisión en compras Bold</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={cardFeeEnabled} 
+                    onChange={e => setCardFeeEnabled(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-pink"></div>
+                </label>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 uppercase text-[9px]">Porcentaje Recargo por Tarjeta (%)</label>
+                <input 
+                  type="number" 
+                  step="any"
+                  value={cardFeePercentage}
+                  disabled={!cardFeeEnabled}
+                  onChange={e => setCardFeePercentage(parseFloat(e.target.value) || 0)}
+                  className={`w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink ${
+                    !cardFeeEnabled ? 'opacity-50 cursor-not-allowed border-slate-800' : ''
+                  }`}
+                  placeholder="e.g. 5"
                 />
               </div>
 
@@ -946,8 +982,9 @@ export default function Configuraciones({
                         type={showPassword ? "text" : "password"}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        placeholder="PIN (vacío es 1234)"
+                        placeholder={selectedEditUser ? "Dejar vacío para no cambiar PIN..." : "Ingrese el PIN de acceso..."}
                         className="w-full bg-cyber-bg border border-cyber-border p-2 pr-9 rounded-lg text-white focus:outline-none glow-border-pink text-xs"
+                        required={!selectedEditUser}
                       />
                       <button
                         type="button"
@@ -1038,7 +1075,8 @@ export default function Configuraciones({
                         { key: 'registrar_gasto', label: 'Registrar Gastos', desc: 'Declarar egresos de caja' },
                         { key: 'abonar_cartera', label: 'Abonar Cartera', desc: 'Saldar deudas de cartera' },
                         { key: 'modificar_configuracion', label: 'Modificar Ajustes', desc: 'Guardar NIT, RUT o IVA' },
-                        { key: 'gestionar_usuarios', label: 'Gestión Agentes', desc: 'Editar accesos y licencias' }
+                        { key: 'gestionar_usuarios', label: 'Gestión Agentes', desc: 'Editar accesos y licencias' },
+                        { key: 'autorizar_descuentos', label: 'Autorizar Descuentos', desc: 'Aprobar rebajas de facturas' }
                       ].map(item => (
                         <label 
                           key={item.key} 
@@ -1191,7 +1229,7 @@ export default function Configuraciones({
                           
                           <div className="mt-2 flex flex-wrap gap-1.5 text-[8px]">
                             <span className="bg-slate-900 text-gray-400 px-1.5 py-0.5 rounded border border-slate-800">
-                              PIN: <strong className="text-gray-200">{u.password || '1234'}</strong>
+                              PIN: <strong className="text-gray-200">{u.password || 'N/D'}</strong>
                             </span>
                             <span className="bg-slate-900 text-gray-400 px-1.5 py-0.5 rounded border border-slate-800">
                               Permisos: <strong className="text-cyber-orange">{enabledCount}/37</strong>
