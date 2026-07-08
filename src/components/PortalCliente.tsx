@@ -24,7 +24,8 @@ import {
   PlusCircle,
   ShieldAlert,
   Trash2,
-  ChevronDown
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import AtomBubble from './AtomBubble';
 
@@ -138,6 +139,7 @@ export default function PortalCliente({
   // Delivery and Payment configurations
   const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
   const [paymentOption, setPaymentOption] = useState<'credit' | 'bold'>('credit');
+  const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment'>('cart');
   
   // Bold Payment Modal states
   const [showBoldModal, setShowBoldModal] = useState(false);
@@ -277,6 +279,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
     onSubmitRequest(newRequest);
 
     setCart([]);
+    setCheckoutStep('cart');
     setOrderSuccess(`¡SOLICITUD EXITOSA! Tu orden #${orderNum} ha sido ingresada al despacho en cola.`);
     
     // Add auto message to chat about order
@@ -723,203 +726,251 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                   </div>
                 </div>
 
-                {/* RESUMEN DEL CARRITO & ENVÍO (Right 2 columns) */}
-                <form onSubmit={handleCheckoutSubmit} className="md:col-span-2 bg-cyber-card border border-cyber-border rounded-xl p-4 flex flex-col justify-between space-y-4">
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold text-white tracking-widest font-mono uppercase border-b border-cyber-border pb-2 flex items-center gap-1.5">
-                      <ShoppingCart size={13} className="text-cyber-pink" />
-                      CARRITO DE CARGA
-                    </h3>
-
-                    {/* Cart Items list */}
-                    {cart.length === 0 ? (
-                      <div className="py-12 text-center text-gray-500 font-mono text-xs flex flex-col items-center justify-center gap-2">
-                        <ShoppingCart size={22} className="text-gray-600 animate-bounce" />
-                        <span>El carrito está vacío. Agregue insumos de la lista.</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
-                        {cart.map(item => (
-                          <div key={item.product.id} className="flex justify-between items-center text-xs font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800">
-                            <div className="max-w-[120px] truncate">
-                              <span className="text-[8px] text-gray-500 block">{item.product.code}</span>
-                              <span className="font-bold text-white block truncate">{item.product.name}</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-1">
-                              <input 
-                                type="number" 
-                                value={item.quantity}
-                                onChange={e => updateCartQty(item.product.id, parseInt(e.target.value) || 1)}
-                                className="w-10 bg-cyber-bg border border-slate-800 text-center text-xs text-white p-1 rounded focus:outline-none"
-                                min="1"
-                                max={item.product.stock}
-                              />
-                              <button 
-                                type="button"
-                                onClick={() => removeFromCart(item.product.id)}
-                                className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
-                              >
-                                ✕
-                              </button>
-                            </div>
-
-                            <span className="font-extrabold text-white text-right">${(item.product.price * item.quantity).toFixed(2)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Delivery and payment configuration fields inside client panel */}
-                    <div className="border-t border-slate-800/80 pt-3 space-y-3 font-mono text-[11px]">
-                      
-                      {/* Modalidad de Entrega */}
-                      <div className="space-y-1">
-                        <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📦 Modalidad de Entrega:</label>
-                        <div className="grid grid-cols-3 gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setDeliveryMethod('oficina')}
-                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
-                              deliveryMethod === 'oficina'
-                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
-                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            Oficina (Moto)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeliveryMethod('cliente')}
-                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
-                              deliveryMethod === 'cliente'
-                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
-                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            Propia Cuenta
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeliveryMethod('recoge')}
-                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
-                              deliveryMethod === 'recoge'
-                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
-                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            Pasa a Retirar
-                          </button>
-                        </div>
-                      </div>
-
-                      {deliveryMethod !== 'recoge' && (
-                        <div className="space-y-1">
-                          <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📍 Dirección de Despacho:</label>
-                          <input 
-                            type="text" 
-                            value={deliveryAddress}
-                            onChange={e => setDeliveryAddress(e.target.value)}
-                            className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink font-sans text-xs"
-                            placeholder="Ingrese dirección destino..."
-                            required
-                          />
-                        </div>
-                      )}
-
-                      {deliveryMethod === 'oficina' && (
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="space-y-1">
-                            <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Transporte:</label>
-                            <select 
-                              value={deliveryTransport}
-                              onChange={e => setDeliveryTransport(e.target.value)}
-                              className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-xs"
-                            >
-                              <option value="Motocicleta">🏍️ Motocicleta</option>
-                              <option value="Bicicleta">🚲 Bicicleta</option>
-                              <option value="Automóvil">🚗 Automóvil</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Oficina:</label>
-                            <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
-                              $15.00 USD
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Modalidad de Pago */}
-                      <div className="space-y-1 border-t border-slate-800/60 pt-2.5">
-                        <label className="block text-[9px] text-gray-400 uppercase tracking-wider">💳 Método de Pago:</label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setPaymentOption('credit')}
-                            className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
-                              paymentOption === 'credit'
-                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
-                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            Línea de Crédito
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPaymentOption('bold')}
-                            className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
-                              paymentOption === 'bold'
-                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
-                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            Pago Online BOLD
-                          </button>
-                        </div>
-                        {paymentOption === 'credit' && (
-                          <div className="text-[9px] text-gray-500 mt-1 flex justify-between">
-                            <span>Crédito Disponible:</span>
-                            <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toFixed(2)}</span>
-                          </div>
-                        )}
-                      </div>
-
+                {/* RESUMEN DEL CARRITO & ENVÍO (Right 2 columns Step-by-Step Wizard) */}
+                <form onSubmit={handleCheckoutSubmit} className="md:col-span-2 bg-cyber-card border border-cyber-border rounded-xl p-4 flex flex-col justify-between space-y-4 min-h-[400px]">
+                  <div className="space-y-4 flex-1 flex flex-col justify-between">
+                    
+                    {/* Wizard Steps indicator */}
+                    <div className="flex justify-between items-center text-[9px] font-mono text-gray-500 uppercase border-b border-cyber-border pb-2.5">
+                      <span className={checkoutStep === 'cart' ? 'text-cyber-pink font-extrabold' : ''}>1. Carrito</span>
+                      <ChevronRight size={10} className="text-gray-600" />
+                      <span className={checkoutStep === 'shipping' ? 'text-cyber-pink font-extrabold' : ''}>2. Despacho</span>
+                      <ChevronRight size={10} className="text-gray-600" />
+                      <span className={checkoutStep === 'payment' ? 'text-cyber-pink font-extrabold' : ''}>3. Pago</span>
                     </div>
 
-                    {/* Cost Breakdown */}
-                    {cart.length > 0 && (
-                      <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 font-mono text-[10px]">
-                        <div className="flex justify-between">
-                          <span>Subtotal Insumos:</span>
-                          <span className="text-white">${cartSubtotal.toFixed(2)}</span>
+                    {/* STEP 1: CART SUMMARY */}
+                    {checkoutStep === 'cart' && (
+                      <div className="flex-1 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <h3 className="text-xs font-bold text-white tracking-widest font-mono uppercase pb-1 flex items-center gap-1.5">
+                            <ShoppingCart size={13} className="text-cyber-pink" />
+                            Carrito de Carga
+                          </h3>
+
+                          {cart.length === 0 ? (
+                            <div className="py-12 text-center text-gray-500 font-mono text-xs flex flex-col items-center justify-center gap-2">
+                              <ShoppingCart size={22} className="text-gray-600 animate-bounce" />
+                              <span>El carrito está vacío. Agregue insumos de la lista.</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                              {cart.map(item => (
+                                <div key={item.product.id} className="flex justify-between items-center text-xs font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                                  <div className="max-w-[120px] truncate">
+                                    <span className="text-[8px] text-gray-500 block">{item.product.code}</span>
+                                    <span className="font-bold text-white block truncate">{item.product.name}</span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1">
+                                    <input 
+                                      type="number" 
+                                      value={item.quantity}
+                                      onChange={e => updateCartQty(item.product.id, parseInt(e.target.value) || 1)}
+                                      className="w-10 bg-cyber-bg border border-slate-800 text-center text-xs text-white p-1 rounded focus:outline-none font-mono"
+                                      min="1"
+                                      max={item.product.stock}
+                                    />
+                                    <button 
+                                      type="button"
+                                      onClick={() => removeFromCart(item.product.id)}
+                                      className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                  <span className="font-extrabold text-white text-right">${(item.product.price * item.quantity).toFixed(2)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex justify-between">
-                          <span>IVA ({config.taxRate}%):</span>
-                          <span className="text-white">${cartTax.toFixed(2)}</span>
-                        </div>
-                        {deliveryMethod === 'oficina' && (
-                          <div className="flex justify-between text-cyber-orange">
-                            <span>Recargo Domicilio:</span>
-                            <span className="font-bold">+$15.00</span>
+
+                        {cart.length > 0 && (
+                          <div className="pt-4 mt-auto">
+                            <div className="flex justify-between text-xs font-mono text-gray-400 border-t border-slate-800/80 pt-2 mb-3">
+                              <span>Subtotal Parcial:</span>
+                              <span className="text-white font-extrabold">${cartSubtotal.toFixed(2)} USD</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setCheckoutStep('shipping')}
+                              className="w-full py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent font-bold tracking-wider font-mono text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              Siguiente: Despacho <ArrowRight size={13} />
+                            </button>
                           </div>
                         )}
-                        <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">
-                          <span>LIQUIDADO TOTAL:</span>
-                          <span className="text-cyber-pink">${cartTotal.toFixed(2)} USD</span>
+                      </div>
+                    )}
+
+                    {/* STEP 2: SHIPPING METHOD */}
+                    {checkoutStep === 'shipping' && (
+                      <div className="flex-1 flex flex-col justify-between space-y-4">
+                        <div className="space-y-3">
+                          <h4 className="text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1">
+                            <span>📦</span> Modalidad de Entrega
+                          </h4>
+                          
+                          <div className="grid grid-cols-3 gap-1">
+                            {(['oficina', 'cliente', 'recoge'] as const).map(method => (
+                              <button
+                                key={method}
+                                type="button"
+                                onClick={() => setDeliveryMethod(method)}
+                                className={`py-2 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer uppercase ${
+                                  deliveryMethod === method
+                                    ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                    : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                {method === 'oficina' ? 'Oficina' : (method === 'cliente' ? 'Propia' : 'Retiro')}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="space-y-3 font-mono text-[11px] pt-1">
+                            {deliveryMethod !== 'recoge' && (
+                              <div className="space-y-1">
+                                <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📍 Dirección de Despacho:</label>
+                                <input 
+                                  type="text" 
+                                  value={deliveryAddress}
+                                  onChange={e => setDeliveryAddress(e.target.value)}
+                                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink font-sans text-xs"
+                                  placeholder="Ingrese dirección destino..."
+                                  required
+                                />
+                              </div>
+                            )}
+
+                            {deliveryMethod === 'oficina' && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1">
+                                  <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Transporte:</label>
+                                  <select 
+                                    value={deliveryTransport}
+                                    onChange={e => setDeliveryTransport(e.target.value)}
+                                    className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-xs"
+                                  >
+                                    <option value="Motocicleta">🏍️ Motocicleta</option>
+                                    <option value="Bicicleta">🚲 Bicicleta</option>
+                                    <option value="Automóvil">🚗 Automóvil</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Envío:</label>
+                                  <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
+                                    $15.00 USD
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setCheckoutStep('cart')}
+                            className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                          >
+                            Atrás
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deliveryMethod !== 'recoge' && !deliveryAddress.trim()}
+                            onClick={() => setCheckoutStep('payment')}
+                            className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                          >
+                            Continuar <ArrowRight size={13} />
+                          </button>
                         </div>
                       </div>
                     )}
-                  </div>
 
-                  <button
-                    type="submit"
-                    disabled={cart.length === 0}
-                    className="w-full py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent disabled:opacity-40 disabled:cursor-not-allowed font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
-                  >
-                    {paymentOption === 'bold' ? 'PAGAR ONLINE CON BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
-                  </button>
+                    {/* STEP 3: PAYMENT METHOD */}
+                    {checkoutStep === 'payment' && (
+                      <div className="flex-1 flex flex-col justify-between space-y-4">
+                        <div className="space-y-4">
+                          <h4 className="text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1">
+                            <span>💳</span> Pasarela de Pago
+                          </h4>
+                          
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentOption('credit')}
+                              className={`py-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer uppercase ${
+                                paymentOption === 'credit'
+                                  ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                  : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              Cupo de Crédito
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPaymentOption('bold')}
+                              className={`py-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer uppercase ${
+                                paymentOption === 'bold'
+                                  ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                  : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              Pago Bold
+                            </button>
+                          </div>
+
+                          {paymentOption === 'credit' && (
+                            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 text-[10px] font-mono flex justify-between">
+                              <span className="text-gray-500">Cupo Disponible:</span>
+                              <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toFixed(2)} USD</span>
+                            </div>
+                          )}
+
+                          {/* Cost Breakdown */}
+                          <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 font-mono text-[10px]">
+                            <div className="flex justify-between">
+                              <span>Subtotal Insumos:</span>
+                              <span className="text-white">${cartSubtotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>IVA ({config.taxRate}%):</span>
+                              <span className="text-white">${cartTax.toFixed(2)}</span>
+                            </div>
+                            {deliveryMethod === 'oficina' && (
+                              <div className="flex justify-between text-cyber-orange">
+                                <span>Recargo Domicilio:</span>
+                                <span className="font-bold">+$15.00</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">
+                              <span>TOTAL A LIQUIDAR:</span>
+                              <span className="text-cyber-pink">${cartTotal.toFixed(2)} USD</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setCheckoutStep('shipping')}
+                            className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                          >
+                            Atrás
+                          </button>
+                          <button
+                            type="submit"
+                            className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
+                          >
+                            {paymentOption === 'bold' ? 'PAGAR ONLINE CON BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
                 </form>
 
               </div>
