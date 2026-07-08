@@ -642,7 +642,7 @@ export default function Facturacion({
                   className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
                 />
                 <div className="sm:col-span-2">
-                  <label className="block text-[10px] text-gray-400 font-mono mb-1">CUPO DE CRÉDITO DISPONIBLE (USD)</label>
+                  <label className="block text-[10px] text-gray-400 font-mono mb-1">CUPO DE CRÉDITO DISPONIBLE (COP)</label>
                   <input 
                     type="number" 
                     value={quickClientCredit}
@@ -974,7 +974,7 @@ export default function Facturacion({
             )}
 
             <div className="space-y-1.5 pt-2 border-t border-slate-800">
-              <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (USD):</label>
+              <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (COP):</label>
               <div className="relative">
                 <input 
                   type="number" 
@@ -996,7 +996,7 @@ export default function Facturacion({
                   <option value="">-- Seleccionar Promoción --</option>
                   {activePromos.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.type === 'porcentaje' ? `${p.value}%` : `$${p.value} USD`})
+                      {p.name} ({p.type === 'porcentaje' ? `${p.value}%` : `$${p.value} COP`})
                     </option>
                   ))}
                 </select>

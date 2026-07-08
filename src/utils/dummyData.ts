@@ -8,7 +8,7 @@ export const INITIAL_BUSINESS_CONFIG: BusinessConfig = {
   email: "operaciones@extremecourier.com",
   invoicePrefix: "EXT",
   taxRate: 19, // 19% IVA standard
-  currency: "USD",
+  currency: "COP",
   paymentMethods: ["Efectivo", "Tarjeta", "Crédito"],
   productCategories: ["Contenedores", "Energía", "Químicos", "Dispositivos", "Protección", "Filtros", "Botánica", "Otros"]
 };
@@ -166,8 +166,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "CT-RAD-01",
     name: "Cápsula de Transporte Radiactivo",
     category: "Contenedores",
-    price: 250.00,
-    cost: 110.00,
+    price: 250000.00,
+    cost: 110000.00,
     stock: 14,
     minStock: 5,
     imageUrl: "☢️"
@@ -177,8 +177,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "BT-FIS-99",
     name: "Batería de Fisión Portátil",
     category: "Energía",
-    price: 450.00,
-    cost: 200.00,
+    price: 450000.00,
+    cost: 200000.00,
     stock: 6,
     minStock: 3,
     imageUrl: "🔋"
@@ -188,8 +188,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "SR-BIO-A",
     name: "Suero Bio-Modulador Alpha",
     category: "Químicos",
-    price: 120.00,
-    cost: 55.00,
+    price: 120000.00,
+    cost: 55000.00,
     stock: 22,
     minStock: 10,
     imageUrl: "🧪"
@@ -199,8 +199,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "TJ-ACC-EN",
     name: "Tarjeta de Acceso Encriptada",
     category: "Dispositivos",
-    price: 80.00,
-    cost: 30.00,
+    price: 80000.00,
+    cost: 30000.00,
     stock: 4,
     minStock: 5, // Trigger low stock alert!
     imageUrl: "💾"
@@ -210,8 +210,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "GT-HAZ-08",
     name: "Guantes de Mitigación de Peligro",
     category: "Protección",
-    price: 65.00,
-    cost: 25.00,
+    price: 65000.00,
+    cost: 25000.00,
     stock: 35,
     minStock: 8,
     imageUrl: "🧤"
@@ -221,8 +221,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "FL-MEC-BIO",
     name: "Filtro de Aire Bio-Mecánico",
     category: "Filtros",
-    price: 95.00,
-    cost: 40.00,
+    price: 95000.00,
+    cost: 40000.00,
     stock: 2,
     minStock: 5, // Trigger low stock alert!
     imageUrl: "🎭"
@@ -232,8 +232,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "RS-NEON-07",
     name: "Rosa de Neón Sintética (Fuerte)",
     category: "Botánica",
-    price: 15.00,
-    cost: 4.50,
+    price: 15000.00,
+    cost: 5000.00,
     stock: 150,
     minStock: 20,
     imageUrl: "🌹"
@@ -243,8 +243,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     code: "EC-GRAF-AT",
     name: "Escudo Atómico de Grafeno",
     category: "Protección",
-    price: 850.00,
-    cost: 420.00,
+    price: 850000.00,
+    cost: 420000.00,
     stock: 5,
     minStock: 2,
     imageUrl: "🛡️"
@@ -270,8 +270,8 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "suministros@cyberdyne.corp",
     phone: "+57 (601) 334-1122",
     address: "Torre Principal de Innovación, Piso 42",
-    creditLimit: 2500.00,
-    outstandingBalance: 850.00, // Credited Graphene Shield
+    creditLimit: 2500000.00,
+    outstandingBalance: 850000.00, // Credited Graphene Shield
     createdAt: "2026-01-15T08:00:00-05:00"
   },
   {
@@ -281,7 +281,7 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "enlaces@paramocourier.org",
     phone: "+57 (315) 888-2910",
     address: "Hangar de Tránsito, Autopista de Ceniza Km 12",
-    creditLimit: 1000.00,
+    creditLimit: 1000000.00,
     outstandingBalance: 0.00,
     createdAt: "2026-02-10T10:30:00-05:00"
   },
@@ -292,8 +292,8 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "procurement@weyland.bio",
     phone: "+57 (602) 445-5678",
     address: "Domo de Investigación Médica #3",
-    creditLimit: 5000.00,
-    outstandingBalance: 450.00, // Credit for fission battery
+    creditLimit: 5000000.00,
+    outstandingBalance: 450000.00, // Credit for fission battery
     createdAt: "2026-03-01T14:15:00-05:00"
   },
   {
@@ -303,8 +303,8 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "elena.vance@resistencia.net",
     phone: "+57 (320) 412-9988",
     address: "Subnivel 4, Laboratorios Black Mesa",
-    creditLimit: 500.00,
-    outstandingBalance: 120.00, // Pending Bio-modulator serum
+    creditLimit: 500000.00,
+    outstandingBalance: 120000.00, // Pending Bio-modulator serum
     createdAt: "2026-04-18T11:00:00-05:00"
   },
   {
@@ -314,7 +314,7 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "contact@nakamuratrading.jp",
     phone: "+57 (601) 777-8899",
     address: "Distrito Financiero de Neón, Of. 909",
-    creditLimit: 3000.00,
+    creditLimit: 3000000.00,
     outstandingBalance: 0.00,
     createdAt: "2026-05-22T09:45:00-05:00"
   }

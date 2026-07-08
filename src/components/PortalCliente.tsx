@@ -182,7 +182,7 @@ export default function PortalCliente({
   // Cart math
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const cartTax = parseFloat((cartSubtotal * (config.taxRate / 100)).toFixed(2));
-  const deliveryCost = deliveryMethod === 'oficina' ? 15.00 : 0.00; // Surcharge only applies if delivery is by office
+  const deliveryCost = deliveryMethod === 'oficina' ? 15000.00 : 0.00; // Surcharge only applies if delivery is by office
   const cartTotal = cartSubtotal + cartTax + deliveryCost;
 
   // 1. Pre-generate order number when entering checkout step 3 (payment)
@@ -198,7 +198,7 @@ export default function PortalCliente({
       const secret = import.meta.env.VITE_BOLD_INTEGRITY_SECRET;
       if (!secret || !currentOrderNum) return;
       
-      const amountInCop = Math.round(cartTotal * 4100).toString();
+      const amountInCop = Math.round(cartTotal).toString();
       const rawString = currentOrderNum + amountInCop + 'COP' + secret;
       
       try {
@@ -268,7 +268,7 @@ export default function PortalCliente({
             
             const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
             const tax = parseFloat((subtotal * (config.taxRate / 100)).toFixed(2));
-            const cost = pending.deliveryMethod === 'oficina' ? 15.00 : 0.00;
+            const cost = pending.deliveryMethod === 'oficina' ? 15000.00 : 0.00;
             const total = subtotal + tax + cost;
 
             const newInvoice: Invoice = {
@@ -331,7 +331,7 @@ Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en o
             setTimeout(() => {
               onSendMessage(
                 client.id,
-                `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${pending.orderNum} por $${total.toFixed(2)} USD. Modalidad: ${
+                `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${pending.orderNum} por $${total.toLocaleString('es-CO')} COP. Modalidad: ${
                   pending.deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
                 }. Pago: Bold. Un despachador de Rosa Fuerte está preparando la carga.`,
                 'agent',
@@ -453,7 +453,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
     setTimeout(() => {
       onSendMessage(
         client.id,
-        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${cartTotal.toFixed(2)} USD. Modalidad: ${
+        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP. Modalidad: ${
           deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
         }. Pago: ${method}. Un despachador de Rosa Fuerte está preparando la carga.`,
         'agent',
@@ -957,7 +957,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                           <div className="pt-4 mt-auto">
                             <div className="flex justify-between text-xs font-mono text-gray-400 border-t border-slate-800/80 pt-2 mb-3">
                               <span>Subtotal Parcial:</span>
-                              <span className="text-white font-extrabold">${cartSubtotal.toFixed(2)} USD</span>
+                              <span className="text-white font-extrabold">${cartSubtotal.toLocaleString('es-CO')} COP</span>
                             </div>
                             <button
                               type="button"
@@ -1028,7 +1028,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                                 <div className="space-y-1">
                                   <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Envío:</label>
                                   <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
-                                    $15.00 USD
+                                    $15.000 COP
                                   </div>
                                 </div>
                               </div>
@@ -1092,7 +1092,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                           {paymentOption === 'credit' && (
                             <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 text-[10px] font-mono flex justify-between">
                               <span className="text-gray-500">Cupo Disponible:</span>
-                              <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toFixed(2)} USD</span>
+                              <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toLocaleString('es-CO')} COP</span>
                             </div>
                           )}
 
@@ -1100,21 +1100,21 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                           <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 font-mono text-[10px]">
                             <div className="flex justify-between">
                               <span>Subtotal Insumos:</span>
-                              <span className="text-white">${cartSubtotal.toFixed(2)}</span>
+                              <span className="text-white">${cartSubtotal.toLocaleString('es-CO')} COP</span>
                             </div>
                             <div className="flex justify-between">
                               <span>IVA ({config.taxRate}%):</span>
-                              <span className="text-white">${cartTax.toFixed(2)}</span>
+                              <span className="text-white">${cartTax.toLocaleString('es-CO')} COP</span>
                             </div>
                             {deliveryMethod === 'oficina' && (
                               <div className="flex justify-between text-cyber-orange">
                                 <span>Recargo Domicilio:</span>
-                                <span className="font-bold">+$15.00</span>
+                                <span className="font-bold">+$15.000 COP</span>
                               </div>
                             )}
                             <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">
                               <span>TOTAL A LIQUIDAR:</span>
-                              <span className="text-cyber-pink">${cartTotal.toFixed(2)} USD</span>
+                              <span className="text-cyber-pink">${cartTotal.toLocaleString('es-CO')} COP</span>
                             </div>
                           </div>
                         </div>
@@ -1125,7 +1125,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                             <div className="space-y-2">
                               <RealBoldPaymentWrapper 
                                 apiKey={import.meta.env.VITE_BOLD_API_KEY}
-                                amount={cartTotal * 4100} // Convert to COP
+                                amount={cartTotal}
                                 orderId={currentOrderNum}
                                 integritySignature={integritySignature}
                               />
@@ -1219,7 +1219,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                           </div>
                           <div className="text-right">
                             <span className="text-gray-400 block text-[10px]">TOTAL DESPACHADO:</span>
-                            <span className="text-white font-extrabold text-sm">${del.total.toFixed(2)} USD</span>
+                            <span className="text-white font-extrabold text-sm">${del.total.toLocaleString('es-CO')} COP</span>
                           </div>
                         </div>
 
@@ -1272,7 +1272,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                             {del.items.map((it, idx) => (
                               <div key={idx} className="flex justify-between">
                                 <span className="text-gray-300">{it.productName} (x{it.quantity})</span>
-                                <span className="text-white">${it.total.toFixed(2)}</span>
+                                <span className="text-white">${it.total.toLocaleString('es-CO')} COP</span>
                               </div>
                             ))}
                           </div>
@@ -1354,7 +1354,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                         </div>
                         <div className="flex justify-between text-xs font-mono">
                           <span className="text-gray-500">Precio Unitario:</span>
-                          <span className="text-white font-extrabold">${prod.price.toFixed(2)} USD</span>
+                          <span className="text-white font-extrabold">${prod.price.toLocaleString('es-CO')} COP</span>
                         </div>
                         <div className="flex justify-between text-xs font-mono items-center">
                           <span className="text-gray-500">Disponibilidad Almacén:</span>
@@ -1835,12 +1835,8 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
             {boldStep === 'select' && (
               <div className="space-y-4">
                 <div className="text-center">
-                  <span className="text-xs text-slate-400 font-medium block">Total a pagar:</span>
                   <span className="text-2xl font-black text-slate-900 font-mono">
-                    ${cartTotal.toFixed(2)} USD
-                  </span>
-                  <span className="text-xs text-[#E82E3E] font-bold block mt-0.5">
-                    ~ ${(cartTotal * 4100).toLocaleString('es-CO')} COP
+                    ${cartTotal.toLocaleString('es-CO')} COP
                   </span>
                 </div>
 
@@ -2020,7 +2016,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                   }}
                   className="w-full py-3 bg-[#E82E3E] hover:bg-[#c92433] text-white font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-[#E82E3E]/20 text-xs font-bold uppercase tracking-wider border-none"
                 >
-                  Pagar ${(cartTotal * 4100).toLocaleString('es-CO')} COP
+                  Pagar ${cartTotal.toLocaleString('es-CO')} COP
                 </button>
               </div>
             )}
@@ -2045,7 +2041,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                 <div className="space-y-1.5">
                   <h3 className="text-base font-extrabold text-slate-800 uppercase animate-pulse">¡Transacción Aprobada!</h3>
                   <p className="text-xs text-emerald-600 font-bold">
-                    Pago de ${(cartTotal * 4100).toLocaleString('es-CO')} COP exitoso
+                    Pago de ${cartTotal.toLocaleString('es-CO')} COP exitoso
                   </p>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[9px] text-slate-500 font-mono space-y-0.5 text-left mt-2">
                     <div><strong>ID Transacción:</strong> BOLD-TX-{Math.floor(100000 + Math.random() * 900000)}</div>

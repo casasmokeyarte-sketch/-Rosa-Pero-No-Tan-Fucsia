@@ -393,7 +393,7 @@ export default function App() {
       } else {
         playTone('Predeterminado');
       }
-      showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toFixed(2)} USD.`, "warning");
+      showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toLocaleString('es-CO')} COP.`, "warning");
       mountTimeRef.current = new Date();
     }
   }, [invoices, soundSettings]);

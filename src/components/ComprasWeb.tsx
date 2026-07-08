@@ -377,13 +377,13 @@ export default function ComprasWeb({ invoices, config, onUpdateInvoice }: Compra
                 {selectedInvoiceForPrint.items.map((it, idx) => (
                   <div key={idx} className="flex justify-between font-bold">
                     <span>{it.productName} (x{it.quantity})</span>
-                    <span>${it.total.toFixed(2)}</span>
+                    <span>${it.total.toLocaleString('es-CO')}</span>
                   </div>
                 ))}
               </div>
               <div className="flex justify-between border-t border-dashed border-black pt-1.5 mt-2 text-sm font-bold">
                 <span>TOTAL LIQUIDADO:</span>
-                <span>${selectedInvoiceForPrint.total.toFixed(2)} USD</span>
+                <span>${selectedInvoiceForPrint.total.toLocaleString('es-CO')} COP</span>
               </div>
             </div>
 
