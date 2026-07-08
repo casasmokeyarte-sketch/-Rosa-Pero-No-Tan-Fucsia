@@ -140,6 +140,8 @@ export default function PortalCliente({
   const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
   const [paymentOption, setPaymentOption] = useState<'credit' | 'bold'>('credit');
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment'>('cart');
+  const [currentOrderNum, setCurrentOrderNum] = useState('');
+  const [integritySignature, setIntegritySignature] = useState('');
   
   // Bold Payment Modal states
   const [showBoldModal, setShowBoldModal] = useState(false);
@@ -177,6 +179,177 @@ export default function PortalCliente({
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategory, setCatalogCategory] = useState('Todos');
 
+  // Cart math
+  const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  const cartTax = parseFloat((cartSubtotal * (config.taxRate / 100)).toFixed(2));
+  const deliveryCost = deliveryMethod === 'oficina' ? 15.00 : 0.00; // Surcharge only applies if delivery is by office
+  const cartTotal = cartSubtotal + cartTax + deliveryCost;
+
+  // 1. Pre-generate order number when entering checkout step 3 (payment)
+  useEffect(() => {
+    if (checkoutStep === 'payment' && !currentOrderNum) {
+      setCurrentOrderNum(`WEB-${Math.floor(1000 + Math.random() * 9000)}`);
+    }
+  }, [checkoutStep, currentOrderNum]);
+
+  // 2. Compute SHA-256 integrity signature if secret key is present
+  useEffect(() => {
+    const computeHash = async () => {
+      const secret = import.meta.env.VITE_BOLD_INTEGRITY_SECRET;
+      if (!secret || !currentOrderNum) return;
+      
+      const amountInCop = Math.round(cartTotal * 4100).toString();
+      const rawString = currentOrderNum + amountInCop + 'COP' + secret;
+      
+      try {
+        const msgBuffer = new TextEncoder().encode(rawString);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        setIntegritySignature(hashHex);
+      } catch (err) {
+        console.error("Error computing integrity signature", err);
+      }
+    };
+    computeHash();
+  }, [currentOrderNum, cartTotal]);
+
+  // 3. Save pending checkout details in localStorage to handle redirect callbacks
+  useEffect(() => {
+    if (checkoutStep === 'payment' && currentOrderNum && cart.length > 0) {
+      const pendingOrder = {
+        orderNum: currentOrderNum,
+        cart: cart,
+        deliveryMethod: deliveryMethod,
+        deliveryAddress: deliveryAddress,
+        deliveryTransport: deliveryTransport,
+        client: client,
+        paymentOption: paymentOption
+      };
+      localStorage.setItem('pending_bold_order', JSON.stringify(pendingOrder));
+    }
+  }, [checkoutStep, currentOrderNum, cart, deliveryMethod, deliveryAddress, deliveryTransport, paymentOption]);
+
+  // 4. Listen to Bold iframe postMessage success events
+  useEffect(() => {
+    const handleBoldMessage = (event: MessageEvent) => {
+      if (event.origin !== 'https://checkout.bold.co') return;
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data && (data.type === 'success' || data.status === 'success' || data.event === 'success')) {
+          showToast("Pago recibido con éxito mediante pasarela Bold", "success");
+          submitInvoice('Bold', 'Pagado');
+        }
+      } catch (e) {
+        // Not JSON
+      }
+    };
+    window.addEventListener('message', handleBoldMessage);
+    return () => window.removeEventListener('message', handleBoldMessage);
+  }, [currentOrderNum, cartTotal]);
+
+  // 5. Restore pending Bold order on page load if redirect callback params are detected
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('bold_status') === 'success') {
+      const pendingStr = localStorage.getItem('pending_bold_order');
+      if (pendingStr) {
+        try {
+          const pending = JSON.parse(pendingStr);
+          if (pending.client && pending.client.id === client.id) {
+            const invoiceItems = pending.cart.map((item: any) => ({
+              productId: item.product.id,
+              productName: item.product.name,
+              price: item.product.price,
+              quantity: item.quantity,
+              taxAmount: parseFloat((item.product.price * item.quantity * (config.taxRate / 100)).toFixed(2)),
+              total: item.product.price * item.quantity
+            }));
+            
+            const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
+            const tax = parseFloat((subtotal * (config.taxRate / 100)).toFixed(2));
+            const cost = pending.deliveryMethod === 'oficina' ? 15.00 : 0.00;
+            const total = subtotal + tax + cost;
+
+            const newInvoice: Invoice = {
+              id: `inv-client-${Date.now()}`,
+              invoiceNumber: pending.orderNum,
+              clientId: client.id,
+              clientName: client.name,
+              clientRut: client.rut,
+              items: invoiceItems,
+              subtotal: subtotal,
+              discount: 0,
+              taxRate: config.taxRate,
+              taxAmount: tax,
+              total: total,
+              paymentMethod: 'Bold',
+              paymentStatus: 'Pagado',
+              dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              createdAt: new Date().toISOString(),
+              cashierName: 'Portal Online',
+              isDelivery: pending.deliveryMethod !== 'recoge',
+              deliveryFee: cost,
+              deliveryRider: pending.deliveryMethod === 'recoge' ? 'N/A' : (pending.deliveryMethod === 'cliente' ? 'Asignado por Cliente' : 'Por Asignar'),
+              deliveryTransport: pending.deliveryMethod === 'recoge' ? 'N/A' : pending.deliveryTransport,
+              deliveryStatus: 'Pendiente',
+              deliveryMethod: pending.deliveryMethod,
+              guideAddress: pending.deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : pending.deliveryAddress
+            };
+
+            onAddInvoice(newInvoice);
+
+            const newRequest: ClientRequest = {
+              id: `req-online-${Date.now()}`,
+              clientId: client.id,
+              clientName: client.name,
+              clientRut: client.rut,
+              type: 'Solicitud',
+              subject: `Nuevo Pedido Online #${pending.orderNum}`,
+              description: `Pedido de Compra y Despacho Online #${pending.orderNum} realizado por ${client.name}.
+Insumos: ${invoiceItems.map((it: any) => `${it.productName} (Cant: ${it.quantity})`).join(', ')}.
+Método de Pago: Pago Online BOLD (Aprobado / Pagado).
+Modalidad de Entrega: ${
+                pending.deliveryMethod === 'oficina' ? 'Despacho por la Oficina' :
+                pending.deliveryMethod === 'cliente' ? 'Domicilio por su cuenta (Cliente)' :
+                'Retiro en persona'
+              }.
+Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)' : pending.deliveryAddress}.`,
+              status: 'Pendiente',
+              priority: 'Alta',
+              createdAt: new Date().toISOString()
+            };
+            onSubmitRequest(newRequest);
+
+            setCart([]);
+            setCheckoutStep('cart');
+            setCurrentOrderNum('');
+            localStorage.removeItem('pending_bold_order');
+            
+            showToast(`¡Pago Bold Exitoso! Pedido #${pending.orderNum} procesado.`, "success");
+
+            setTimeout(() => {
+              onSendMessage(
+                client.id,
+                `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${pending.orderNum} por $${total.toFixed(2)} USD. Modalidad: ${
+                  pending.deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
+                }. Pago: Bold. Un despachador de Rosa Fuerte está preparando la carga.`,
+                'agent',
+                'Asistente Digital'
+              );
+            }, 1500);
+
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+            setActiveTab('trayectoria');
+          }
+        } catch (e) {
+          console.error("Error restoring pending Bold order", e);
+        }
+      }
+    }
+  }, []);
+
   // Auto scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -207,12 +380,6 @@ export default function PortalCliente({
   const removeFromCart = (productId: string) => {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
-
-  // Cart math
-  const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
-  const cartTax = parseFloat((cartSubtotal * (config.taxRate / 100)).toFixed(2));
-  const deliveryCost = deliveryMethod === 'oficina' ? 15.00 : 0.00; // Surcharge only applies if delivery is by office
-  const cartTotal = cartSubtotal + cartTax + deliveryCost;
 
   // Helper to submit the invoice and request to Bunker Portal
   const submitInvoice = (method: string, status: 'Pagado' | 'Pendiente') => {
@@ -952,20 +1119,47 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => setCheckoutStep('shipping')}
-                            className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
-                          >
-                            Atrás
-                          </button>
-                          <button
-                            type="submit"
-                            className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
-                          >
-                            {paymentOption === 'bold' ? 'PAGAR ONLINE CON BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
-                          </button>
+                        {/* Real Bold Button loader or credit checkout buttons */}
+                        <div className="space-y-3 pt-2 border-t border-slate-800/80">
+                          {paymentOption === 'bold' && import.meta.env.VITE_BOLD_API_KEY ? (
+                            <div className="space-y-2">
+                              <RealBoldPaymentWrapper 
+                                apiKey={import.meta.env.VITE_BOLD_API_KEY}
+                                amount={cartTotal * 4100} // Convert to COP
+                                orderId={currentOrderNum}
+                                integritySignature={integritySignature}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setCheckoutStep('shipping')}
+                                className="w-full py-2 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                              >
+                                Atrás
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setCheckoutStep('shipping')}
+                                className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                              >
+                                Atrás
+                              </button>
+                              <button
+                                type="submit"
+                                className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
+                              >
+                                {paymentOption === 'bold' ? 'PROBAR SIMULADOR BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
+                              </button>
+                            </div>
+                          )}
+
+                          {paymentOption === 'bold' && !import.meta.env.VITE_BOLD_API_KEY && (
+                            <div className="bg-amber-400/5 border border-amber-400/20 p-2.5 rounded-xl text-[9px] text-amber-400 leading-normal font-sans">
+                              ⚠️ <strong>Nota:</strong> Se cargará el simulador de pasarela Bold. Para usar tu botón real, agrega <code className="bg-slate-950 px-1 py-0.5 rounded text-white text-[8px]">VITE_BOLD_API_KEY</code> en tu archivo <code className="bg-slate-950 px-1 py-0.5 rounded text-white text-[8px]">.env.local</code>.
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1878,6 +2072,51 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
         </div>
       )}
 
+    </div>
+  );
+}
+
+interface RealBoldPaymentWrapperProps {
+  apiKey: string;
+  amount: number;
+  orderId: string;
+  integritySignature?: string;
+}
+
+function RealBoldPaymentWrapper({ apiKey, amount, orderId, integritySignature }: RealBoldPaymentWrapperProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Clear previous elements
+    containerRef.current.innerHTML = '';
+
+    // Create script tag
+    const script = document.createElement('script');
+    script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
+    script.async = true;
+    script.setAttribute('data-bold-button', 'dark-M');
+    script.setAttribute('data-api-key', apiKey);
+    script.setAttribute('data-amount', Math.round(amount).toString());
+    script.setAttribute('data-currency', 'COP');
+    script.setAttribute('data-order-id', orderId);
+    script.setAttribute('data-redirect-url', window.location.origin + window.location.pathname + '?bold_status=success');
+    
+    if (integritySignature) {
+      script.setAttribute('data-integrity-signature', integritySignature);
+    }
+
+    // Append script to container
+    containerRef.current.appendChild(script);
+  }, [apiKey, amount, orderId, integritySignature]);
+
+  return (
+    <div className="flex flex-col items-center justify-center p-3.5 bg-slate-950 border border-slate-900 rounded-xl space-y-2">
+      <span className="text-[9px] text-gray-500 font-mono">Pasarela Segura Bold activa</span>
+      <div ref={containerRef} className="flex justify-center w-full min-h-[40px]">
+        <span className="text-[9px] text-gray-400 font-mono animate-pulse">Invocando botón oficial de Bold...</span>
+      </div>
     </div>
   );
 }
