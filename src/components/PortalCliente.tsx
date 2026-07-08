@@ -135,6 +135,25 @@ export default function PortalCliente({
   const [deliveryTransport, setDeliveryTransport] = useState('Motocicleta');
   const [deliveryAddress, setDeliveryAddress] = useState(client.address || 'Hangar Principal de Enlace');
 
+  // Delivery and Payment configurations
+  const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
+  const [paymentOption, setPaymentOption] = useState<'credit' | 'bold'>('credit');
+  
+  // Bold Payment Modal states
+  const [showBoldModal, setShowBoldModal] = useState(false);
+  const [boldStep, setBoldStep] = useState<'select' | 'input' | 'processing' | 'success'>('select');
+  const [boldPaymentType, setBoldPaymentType] = useState<'card' | 'pse' | 'nequi_daviplata'>('card');
+  
+  // Form fields for Bold
+  const [boldCardNumber, setBoldCardNumber] = useState('');
+  const [boldCardHolder, setBoldCardHolder] = useState('');
+  const [boldCardExpiry, setBoldCardExpiry] = useState('');
+  const [boldCardCVV, setBoldCardCVV] = useState('');
+  const [boldPseBank, setBoldPseBank] = useState('Bancolombia');
+  const [boldPseEmail, setBoldPseEmail] = useState(client.email || '');
+  const [boldPseName, setBoldPseName] = useState(client.name || '');
+  const [boldPhoneWallet, setBoldPhoneWallet] = useState(client.phone || '');
+
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
   const displayMessages = clientChatMessages.length > 0 ? clientChatMessages : [
@@ -190,15 +209,11 @@ export default function PortalCliente({
   // Cart math
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const cartTax = parseFloat((cartSubtotal * (config.taxRate / 100)).toFixed(2));
-  const deliveryCost = 15.00; // Flat online order delivery surcharge
+  const deliveryCost = deliveryMethod === 'oficina' ? 15.00 : 0.00; // Surcharge only applies if delivery is by office
   const cartTotal = cartSubtotal + cartTax + deliveryCost;
 
-  // Submit client online order
-  const handlePlaceOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (cart.length === 0) return;
-
-    // Build invoice items
+  // Helper to submit the invoice and request to Bunker Portal
+  const submitInvoice = (method: string, status: 'Pagado' | 'Pendiente') => {
     const invoiceItems: InvoiceItem[] = cart.map(item => ({
       productId: item.product.id,
       productName: item.product.name,
@@ -208,7 +223,6 @@ export default function PortalCliente({
       total: item.product.price * item.quantity
     }));
 
-    // Generate random code for invoice
     const orderNum = `WEB-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newInvoice: Invoice = {
@@ -223,19 +237,45 @@ export default function PortalCliente({
       taxRate: config.taxRate,
       taxAmount: cartTax,
       total: cartTotal,
-      paymentMethod: 'Crédito', // Defaults to account credit line
-      paymentStatus: 'Pendiente',
-      dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 15 days term
+      paymentMethod: method,
+      paymentStatus: status,
+      dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
       cashierName: 'Portal Online',
-      isDelivery: true,
+      isDelivery: deliveryMethod !== 'recoge',
       deliveryFee: deliveryCost,
-      deliveryRider: deliveryRider || 'Mensajero Central',
-      deliveryTransport: deliveryTransport,
-      deliveryStatus: 'Pendiente'
+      deliveryRider: deliveryMethod === 'recoge' ? 'N/A' : (deliveryMethod === 'cliente' ? 'Asignado por Cliente' : deliveryRider),
+      deliveryTransport: deliveryMethod === 'recoge' ? 'N/A' : deliveryTransport,
+      deliveryStatus: 'Pendiente',
+      deliveryMethod: deliveryMethod,
+      guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress
     };
 
     onAddInvoice(newInvoice);
+
+    // Create client request notification for portal bunker
+    const newRequest: ClientRequest = {
+      id: `req-online-${Date.now()}`,
+      clientId: client.id,
+      clientName: client.name,
+      clientRut: client.rut,
+      type: 'Solicitud',
+      subject: `Nuevo Pedido Online #${orderNum}`,
+      description: `Pedido de Compra y Despacho Online #${orderNum} realizado por ${client.name}.
+Insumos: ${invoiceItems.map(it => `${it.productName} (Cant: ${it.quantity})`).join(', ')}.
+Método de Pago: ${method === 'Bold' ? 'Pago Online BOLD (Aprobado / Pagado)' : 'Línea de Crédito (Pendiente Cobro)'}.
+Modalidad de Entrega: ${
+        deliveryMethod === 'oficina' ? 'Despacho por la Oficina' :
+        deliveryMethod === 'cliente' ? 'Domicilio por su cuenta (Cliente)' :
+        'Retiro en persona'
+      }.
+Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)' : deliveryAddress}.`,
+      status: 'Pendiente',
+      priority: 'Alta',
+      createdAt: new Date().toISOString()
+    };
+    onSubmitRequest(newRequest);
+
     setCart([]);
     setOrderSuccess(`¡SOLICITUD EXITOSA! Tu orden #${orderNum} ha sido ingresada al despacho en cola.`);
     
@@ -243,7 +283,9 @@ export default function PortalCliente({
     setTimeout(() => {
       onSendMessage(
         client.id,
-        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por un valor total de $${cartTotal.toFixed(2)} USD. Un despachador de Rosa Fuerte está preparando la carga.`,
+        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${cartTotal.toFixed(2)} USD. Modalidad: ${
+          deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
+        }. Pago: ${method}. Un despachador de Rosa Fuerte está preparando la carga.`,
         'agent',
         'Asistente Digital'
       );
@@ -254,6 +296,24 @@ export default function PortalCliente({
       setOrderSuccess(null);
       setActiveTab('trayectoria');
     }, 4500);
+  };
+
+  // Submit client online order checkout
+  const handleCheckoutSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0) return;
+
+    if (paymentOption === 'credit') {
+      const availableCredit = client.creditLimit - client.outstandingBalance;
+      if (cartTotal > availableCredit) {
+        showToast("Cupo de crédito insuficiente para esta orden corporativa.", "error");
+        return;
+      }
+      submitInvoice('Crédito', 'Pendiente');
+    } else {
+      setBoldStep('select');
+      setShowBoldModal(true);
+    }
   };
 
   // Send message chat simulation
@@ -664,7 +724,7 @@ export default function PortalCliente({
                 </div>
 
                 {/* RESUMEN DEL CARRITO & ENVÍO (Right 2 columns) */}
-                <form onSubmit={handlePlaceOrder} className="md:col-span-2 bg-cyber-card border border-cyber-border rounded-xl p-4 flex flex-col justify-between space-y-4">
+                <form onSubmit={handleCheckoutSubmit} className="md:col-span-2 bg-cyber-card border border-cyber-border rounded-xl p-4 flex flex-col justify-between space-y-4">
                   <div className="space-y-4">
                     <h3 className="text-xs font-bold text-white tracking-widest font-mono uppercase border-b border-cyber-border pb-2 flex items-center gap-1.5">
                       <ShoppingCart size={13} className="text-cyber-pink" />
@@ -710,41 +770,120 @@ export default function PortalCliente({
                       </div>
                     )}
 
-                    {/* Delivery configuration fields inside client panel */}
+                    {/* Delivery and payment configuration fields inside client panel */}
                     <div className="border-t border-slate-800/80 pt-3 space-y-3 font-mono text-[11px]">
                       
+                      {/* Modalidad de Entrega */}
                       <div className="space-y-1">
-                        <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📍 Dirección de Despacho:</label>
-                        <input 
-                          type="text" 
-                          value={deliveryAddress}
-                          onChange={e => setDeliveryAddress(e.target.value)}
-                          className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink font-sans text-xs"
-                          placeholder="Ingrese dirección destino..."
-                          required
-                        />
+                        <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📦 Modalidad de Entrega:</label>
+                        <div className="grid grid-cols-3 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryMethod('oficina')}
+                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
+                              deliveryMethod === 'oficina'
+                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            Oficina (Moto)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryMethod('cliente')}
+                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
+                              deliveryMethod === 'cliente'
+                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            Propia Cuenta
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryMethod('recoge')}
+                            className={`py-1.5 rounded-lg border text-[9px] font-bold transition-all text-center cursor-pointer ${
+                              deliveryMethod === 'recoge'
+                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            Pasa a Retirar
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
+                      {deliveryMethod !== 'recoge' && (
                         <div className="space-y-1">
-                          <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Transporte:</label>
-                          <select 
-                            value={deliveryTransport}
-                            onChange={e => setDeliveryTransport(e.target.value)}
-                            className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-xs"
-                          >
-                            <option value="Motocicleta">🏍️ Motocicleta</option>
-                            <option value="Bicicleta">🚲 Bicicleta</option>
-                            <option value="Automóvil">🚗 Automóvil</option>
-                          </select>
+                          <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📍 Dirección de Despacho:</label>
+                          <input 
+                            type="text" 
+                            value={deliveryAddress}
+                            onChange={e => setDeliveryAddress(e.target.value)}
+                            className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink font-sans text-xs"
+                            placeholder="Ingrese dirección destino..."
+                            required
+                          />
                         </div>
+                      )}
 
-                        <div className="space-y-1">
-                          <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Domicilio:</label>
-                          <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
-                            $15.00 USD
+                      {deliveryMethod === 'oficina' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Transporte:</label>
+                            <select 
+                              value={deliveryTransport}
+                              onChange={e => setDeliveryTransport(e.target.value)}
+                              className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-xs"
+                            >
+                              <option value="Motocicleta">🏍️ Motocicleta</option>
+                              <option value="Bicicleta">🚲 Bicicleta</option>
+                              <option value="Automóvil">🚗 Automóvil</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Oficina:</label>
+                            <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
+                              $15.00 USD
+                            </div>
                           </div>
                         </div>
+                      )}
+
+                      {/* Modalidad de Pago */}
+                      <div className="space-y-1 border-t border-slate-800/60 pt-2.5">
+                        <label className="block text-[9px] text-gray-400 uppercase tracking-wider">💳 Método de Pago:</label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setPaymentOption('credit')}
+                            className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
+                              paymentOption === 'credit'
+                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            Línea de Crédito
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPaymentOption('bold')}
+                            className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer ${
+                              paymentOption === 'bold'
+                                ? 'bg-cyber-pink/20 border-cyber-pink text-cyber-pink'
+                                : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            Pago Online BOLD
+                          </button>
+                        </div>
+                        {paymentOption === 'credit' && (
+                          <div className="text-[9px] text-gray-500 mt-1 flex justify-between">
+                            <span>Crédito Disponible:</span>
+                            <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toFixed(2)}</span>
+                          </div>
+                        )}
                       </div>
 
                     </div>
@@ -760,10 +899,12 @@ export default function PortalCliente({
                           <span>IVA ({config.taxRate}%):</span>
                           <span className="text-white">${cartTax.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between text-cyber-orange">
-                          <span>Recargo Domicilio:</span>
-                          <span className="font-bold">+$15.00</span>
-                        </div>
+                        {deliveryMethod === 'oficina' && (
+                          <div className="flex justify-between text-cyber-orange">
+                            <span>Recargo Domicilio:</span>
+                            <span className="font-bold">+$15.00</span>
+                          </div>
+                        )}
                         <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">
                           <span>LIQUIDADO TOTAL:</span>
                           <span className="text-cyber-pink">${cartTotal.toFixed(2)} USD</span>
@@ -777,7 +918,7 @@ export default function PortalCliente({
                     disabled={cart.length === 0}
                     className="w-full py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent disabled:opacity-40 disabled:cursor-not-allowed font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
                   >
-                    CONFIRMAR Y DESPACHAR ORDEN
+                    {paymentOption === 'bold' ? 'PAGAR ONLINE CON BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
                   </button>
                 </form>
 
@@ -1416,6 +1557,272 @@ export default function PortalCliente({
                 ENTENDIDO / EMPEZAR
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bold Payment Gateway Modal */}
+      {showBoldModal && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white text-slate-800 border-2 border-[#E82E3E]/60 rounded-3xl max-w-md w-full p-6 space-y-6 relative shadow-[0_0_50px_rgba(232,46,62,0.25)] font-sans">
+            
+            {/* Bold Brand Header */}
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="bg-[#E82E3E] text-white font-black px-3 py-1 rounded-xl text-lg tracking-tighter uppercase">
+                  bold.
+                </span>
+                <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  Pago Seguro
+                </span>
+              </div>
+              {boldStep !== 'processing' && boldStep !== 'success' && (
+                <button 
+                  onClick={() => setShowBoldModal(false)}
+                  className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer text-sm p-1 rounded-full hover:bg-slate-50 border-none bg-transparent"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* STEP 1: Select payment type or fill inputs */}
+            {boldStep === 'select' && (
+              <div className="space-y-4">
+                <div className="text-center">
+                  <span className="text-xs text-slate-400 font-medium block">Total a pagar:</span>
+                  <span className="text-2xl font-black text-slate-900 font-mono">
+                    ${cartTotal.toFixed(2)} USD
+                  </span>
+                  <span className="text-xs text-[#E82E3E] font-bold block mt-0.5">
+                    ~ ${(cartTotal * 4100).toLocaleString('es-CO')} COP
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    Seleccione medio de pago:
+                  </label>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBoldPaymentType('card')}
+                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
+                        boldPaymentType === 'card' 
+                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
+                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-lg">💳</span>
+                      <span className="text-[9px] font-bold uppercase">Tarjeta</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBoldPaymentType('pse')}
+                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
+                        boldPaymentType === 'pse' 
+                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
+                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-lg">🏦</span>
+                      <span className="text-[9px] font-bold uppercase">PSE</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBoldPaymentType('nequi_daviplata')}
+                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
+                        boldPaymentType === 'nequi_daviplata' 
+                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
+                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-lg">📱</span>
+                      <span className="text-[9px] font-bold uppercase">Nequi/D.Plata</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* FORM FIELDS */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                  {boldPaymentType === 'card' && (
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Número de Tarjeta</label>
+                        <input
+                          type="text"
+                          value={boldCardNumber}
+                          onChange={e => setBoldCardNumber(e.target.value.replace(/\D/g, '').substring(0, 16))}
+                          placeholder="4111 2222 3333 4444"
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] font-mono"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Nombre del Tarjetahabiente</label>
+                        <input
+                          type="text"
+                          value={boldCardHolder}
+                          onChange={e => setBoldCardHolder(e.target.value)}
+                          placeholder="JHON DOE"
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] uppercase"
+                          required
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] text-slate-400 font-bold uppercase">Expiración (MM/AA)</label>
+                          <input
+                            type="text"
+                            value={boldCardExpiry}
+                            onChange={e => {
+                              let val = e.target.value.replace(/\D/g, '');
+                              if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2, 4);
+                              setBoldCardExpiry(val);
+                            }}
+                            placeholder="12/29"
+                            maxLength={5}
+                            className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] text-center font-mono"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-slate-400 font-bold uppercase">CVC / CVV</label>
+                          <input
+                            type="password"
+                            value={boldCardCVV}
+                            onChange={e => setBoldCardCVV(e.target.value.replace(/\D/g, '').substring(0, 4))}
+                            placeholder="***"
+                            className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] text-center font-mono"
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {boldPaymentType === 'pse' && (
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Seleccione Banco</label>
+                        <select
+                          value={boldPseBank}
+                          onChange={e => setBoldPseBank(e.target.value)}
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
+                        >
+                          <option value="Bancolombia">Bancolombia</option>
+                          <option value="Banco de Bogotá">Banco de Bogotá</option>
+                          <option value="Davivienda">Davivienda</option>
+                          <option value="Nequi">Nequi</option>
+                          <option value="Lulo Bank">Lulo Bank</option>
+                          <option value="Nu Colombia">Nu Colombia</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Nombre Completo Titular</label>
+                        <input
+                          type="text"
+                          value={boldPseName}
+                          onChange={e => setBoldPseName(e.target.value)}
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Correo Registrado en PSE</label>
+                        <input
+                          type="email"
+                          value={boldPseEmail}
+                          onChange={e => setBoldPseEmail(e.target.value)}
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {boldPaymentType === 'nequi_daviplata' && (
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Número de Celular</label>
+                        <input
+                          type="text"
+                          value={boldPhoneWallet}
+                          onChange={e => setBoldPhoneWallet(e.target.value.replace(/\D/g, '').substring(0, 10))}
+                          placeholder="3001234567"
+                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] font-mono"
+                          required
+                        />
+                      </div>
+                      <p className="text-[9px] text-slate-400 leading-normal">
+                        Se enviará una notificación Push a su aplicación móvil para autorizar el débito en tiempo real.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBoldStep('processing');
+                    setTimeout(() => {
+                      setBoldStep('success');
+                      playTone(notifTone as any);
+                    }, 2500);
+                  }}
+                  className="w-full py-3 bg-[#E82E3E] hover:bg-[#c92433] text-white font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-[#E82E3E]/20 text-xs font-bold uppercase tracking-wider border-none"
+                >
+                  Pagar ${(cartTotal * 4100).toLocaleString('es-CO')} COP
+                </button>
+              </div>
+            )}
+
+            {/* STEP 2: Processing Payment */}
+            {boldStep === 'processing' && (
+              <div className="py-12 flex flex-col items-center justify-center space-y-4">
+                <div className="w-12 h-12 border-4 border-[#E82E3E] border-t-transparent rounded-full animate-spin"></div>
+                <div className="text-center space-y-1">
+                  <h3 className="text-sm font-extrabold text-slate-800">PROCESANDO PAGO SEGURO BOLD</h3>
+                  <p className="text-[10px] text-slate-400">Verificando fondos y encriptando transacción en canal SSL...</p>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: Payment Success */}
+            {boldStep === 'success' && (
+              <div className="py-6 flex flex-col items-center justify-center space-y-5 text-center">
+                <div className="w-14 h-14 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center text-3xl font-extrabold border-2 border-emerald-500/30 animate-bounce">
+                  ✓
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-slate-800 uppercase animate-pulse">¡Transacción Aprobada!</h3>
+                  <p className="text-xs text-emerald-600 font-bold">
+                    Pago de ${(cartTotal * 4100).toLocaleString('es-CO')} COP exitoso
+                  </p>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[9px] text-slate-500 font-mono space-y-0.5 text-left mt-2">
+                    <div><strong>ID Transacción:</strong> BOLD-TX-{Math.floor(100000 + Math.random() * 900000)}</div>
+                    <div><strong>Entidad Emisora:</strong> {boldPaymentType === 'card' ? 'Tarjeta Crédito/Débito' : (boldPaymentType === 'pse' ? boldPseBank : 'Monedero Digital')}</div>
+                    <div><strong>Código de Aut:</strong> B-{Math.floor(10000 + Math.random() * 90000)}</div>
+                    <div><strong>Fecha:</strong> {new Date().toLocaleString()}</div>
+                  </div>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBoldModal(false);
+                    submitInvoice('Bold', 'Pagado');
+                  }}
+                  className="w-full py-3 bg-[#E82E3E] hover:bg-[#c92433] text-white font-bold rounded-xl transition-all cursor-pointer text-xs uppercase tracking-wider font-bold border-none"
+                >
+                  Finalizar y Generar Pedido
+                </button>
+              </div>
+            )}
+
           </div>
         </div>
       )}

@@ -27,8 +27,8 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
   const [statusFilter, setStatusFilter] = useState<'Todos' | 'Pendiente' | 'En Camino' | 'Entregado' | 'Cancelado'>('Todos');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
-  // Get all delivery-related invoices
-  const deliveryInvoices = invoices.filter(inv => inv.isDelivery);
+  // Get all delivery-related invoices, including online client portal requests
+  const deliveryInvoices = invoices.filter(inv => inv.isDelivery || inv.cashierName === 'Portal Online');
 
   // Statistics calculations
   const totalDeliveriesCount = deliveryInvoices.length;
@@ -206,9 +206,20 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
             <tbody className="divide-y divide-slate-800/60 font-mono">
               {filteredDeliveries.map(delivery => {
                 let statusBadgeColor = 'text-amber-400 bg-amber-400/10 border-amber-400/20';
-                if (delivery.deliveryStatus === 'En Camino') statusBadgeColor = 'text-cyan-400 bg-cyan-400/10 border-cyber-cyan/20 animate-pulse';
-                if (delivery.deliveryStatus === 'Entregado') statusBadgeColor = 'text-cyber-green bg-cyber-green/10 border-cyber-green/20';
-                if (delivery.deliveryStatus === 'Cancelado') statusBadgeColor = 'text-red-400 bg-red-400/10 border-red-400/20';
+                let statusLabel = delivery.deliveryStatus || '';
+
+                if (delivery.deliveryStatus === 'Pendiente') {
+                  statusLabel = 'Por Empacar';
+                } else if (delivery.deliveryStatus === 'En Camino') {
+                  statusBadgeColor = 'text-cyan-400 bg-cyan-400/10 border-cyber-cyan/20 animate-pulse';
+                  statusLabel = delivery.deliveryMethod === 'recoge' ? 'Listo para Retiro' : 'En Camino';
+                } else if (delivery.deliveryStatus === 'Entregado') {
+                  statusBadgeColor = 'text-cyber-green bg-cyber-green/10 border-cyber-green/20';
+                  statusLabel = delivery.deliveryMethod === 'recoge' ? 'Retirado' : 'Entregado';
+                } else if (delivery.deliveryStatus === 'Cancelado') {
+                  statusBadgeColor = 'text-red-400 bg-red-400/10 border-red-400/20';
+                  statusLabel = 'Cancelado';
+                }
 
                 return (
                   <tr key={delivery.id} className="hover:bg-slate-900/40 text-gray-300">
@@ -229,13 +240,27 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
                     </td>
 
                     {/* Delivery Address */}
-                    <td className="p-4 max-w-xs truncate" title={delivery.clientRut}>
+                    <td className="p-4 max-w-xs truncate text-xs" title={delivery.guideAddress || delivery.clientRut}>
                       <div className="flex items-center gap-1 text-gray-200">
                         <MapPin size={11} className="text-cyber-pink shrink-0" />
-                        <span className="truncate">{delivery.clientRut === '222.222.222-2' ? 'Venta Directa / Despacho Programado' : 'Dirección Registrada'}</span>
+                        <span className="truncate">{delivery.guideAddress || (delivery.clientRut === '222.222.222-2' ? 'Venta Directa / Despacho Programado' : 'Dirección Registrada')}</span>
                       </div>
-                      <div className="text-[10px] text-gray-500 mt-1">
-                        Modalidad: {delivery.paymentMethod}
+                      <div className="text-[10px] text-gray-500 mt-1 flex flex-col gap-0.5">
+                        <div>Cobro: <span className="text-white font-bold">{delivery.paymentMethod}</span></div>
+                        {delivery.deliveryMethod && (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span>Modalidad:</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                              delivery.deliveryMethod === 'oficina' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
+                              delivery.deliveryMethod === 'cliente' ? 'bg-cyber-pink/10 text-cyber-pink border border-cyber-pink/20' :
+                              'bg-amber-400/10 text-amber-400 border border-amber-400/20'
+                            }`}>
+                              {delivery.deliveryMethod === 'oficina' ? 'Por Oficina' :
+                               delivery.deliveryMethod === 'cliente' ? 'Cuenta Propia' :
+                               'Retiro en persona'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </td>
 
@@ -258,7 +283,7 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
                     {/* Delivery Status */}
                     <td className="p-4 text-center">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border ${statusBadgeColor}`}>
-                        {delivery.deliveryStatus?.toUpperCase()}
+                        {statusLabel.toUpperCase()}
                       </span>
                     </td>
 
@@ -271,10 +296,10 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
                           <button
                             onClick={() => handleUpdateStatus(delivery.id, 'En Camino')}
                             className="bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/40 px-2 py-1 rounded text-[10px] font-bold border border-cyan-500/30 cursor-pointer flex items-center gap-1 transition-all"
-                            title="Despachar en ruta"
+                            title={delivery.deliveryMethod === 'recoge' ? "Marcar listo para retiro" : "Despachar y empacar"}
                           >
                             <Play size={10} />
-                            <span>RUTA</span>
+                            <span>{delivery.deliveryMethod === 'recoge' ? 'EMPACAR' : 'DESPACHAR'}</span>
                           </button>
                         )}
 
@@ -282,10 +307,10 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
                           <button
                             onClick={() => handleUpdateStatus(delivery.id, 'Entregado')}
                             className="bg-cyber-green/20 text-cyber-green hover:bg-cyber-green/40 px-2 py-1 rounded text-[10px] font-bold border border-cyber-green/30 cursor-pointer flex items-center gap-1 transition-all"
-                            title="Marcar como entregado"
+                            title={delivery.deliveryMethod === 'recoge' ? "Confirmar retiro por cliente" : "Marcar como entregado"}
                           >
                             <CheckCircle size={10} />
-                            <span>ENTREGAR</span>
+                            <span>{delivery.deliveryMethod === 'recoge' ? 'RETIRAR' : 'ENTREGAR'}</span>
                           </button>
                         )}
 

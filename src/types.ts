@@ -175,6 +175,7 @@ export interface UserPermissions {
   // Módulos (Acceso a Pestañas)
   dashboard: boolean;
   facturacion: boolean;
+  compras_web?: boolean;
   domicilios: boolean;
   clientes: boolean;
   inventario: boolean;

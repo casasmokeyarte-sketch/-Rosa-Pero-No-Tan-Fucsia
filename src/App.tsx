@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Client, 
   Product, 
@@ -43,6 +43,7 @@ import Configuraciones from './components/Configuraciones';
 import HistorialCierres from './components/HistorialCierres';
 import Domicilios from './components/Domicilios';
 import PortalCliente from './components/PortalCliente';
+import ComprasWeb from './components/ComprasWeb';
 import IdentificadorTlf from './components/IdentificadorTlf';
 import ChatSoporte from './components/ChatSoporte';
 import SolicitudesClientes from './components/SolicitudesClientes';
@@ -69,6 +70,7 @@ import {
   AlertTriangle,
   UserCheck,
   FileText,
+  Globe,
   Maximize,
   Minimize,
   Lock,
@@ -89,6 +91,7 @@ export function getUserPermissions(user: User): UserPermissions {
   return {
     dashboard: true,
     facturacion: true,
+    compras_web: true,
     domicilios: true,
     clientes: true,
     inventario: true,
@@ -211,6 +214,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const mountTimeRef = useRef(new Date());
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
 
   // Toast System State
   interface Toast {
@@ -375,6 +380,23 @@ export default function App() {
   useEffect(() => { localStorage.setItem('extreme_sound_settings', JSON.stringify(soundSettings)); }, [soundSettings]);
 
   useEffect(() => { localStorage.setItem('extreme_payroll', JSON.stringify(payrollEntries)); }, [payrollEntries]);
+
+  // Listen for new online orders and play sound / show notification toast for the operator
+  useEffect(() => {
+    const newOnlineInvoices = invoices.filter(inv => 
+      inv.cashierName === 'Portal Online' && 
+      new Date(inv.createdAt) > mountTimeRef.current
+    );
+    if (newOnlineInvoices.length > 0) {
+      if (soundSettings.soundEnabled && soundSettings.notifSoundEnabled) {
+        playTone(soundSettings.defaultTone as any);
+      } else {
+        playTone('Predeterminado');
+      }
+      showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toFixed(2)} USD.`, "warning");
+      mountTimeRef.current = new Date();
+    }
+  }, [invoices, soundSettings]);
 
   // Payroll CRUD Handlers
   const handleAddPayrollEntry = (entry: PayrollEntry) => {
@@ -840,21 +862,30 @@ export default function App() {
     // A. Add Invoice to ledger
     setInvoices(prev => [...prev, newInvoice]);
 
-    // B. Deduct product inventory from current cashier's personal stock and write stock adjustments
+    // B. Deduct product inventory from stock or cashier's personal stock and write stock adjustments
     setProducts(prevProducts => {
       return prevProducts.map(p => {
         const cartItem = newInvoice.items.find(item => item.productId === p.id);
         if (cartItem) {
-          const userStocks = p.userStocks || {};
-          const currentUserId = currentUser.id;
-          const currentStock = userStocks[currentUserId] !== undefined ? userStocks[currentUserId] : 0;
-          return {
-            ...p,
-            userStocks: {
-              ...userStocks,
-              [currentUserId]: Math.max(0, currentStock - cartItem.quantity)
-            }
-          };
+          if (newInvoice.cashierName === 'Portal Online') {
+            // Deduct from warehouse stock directly
+            return {
+              ...p,
+              stock: Math.max(0, p.stock - cartItem.quantity)
+            };
+          } else {
+            // Deduct from cashier's stock
+            const userStocks = p.userStocks || {};
+            const currentUserId = currentUser?.id || 'admin';
+            const currentStock = userStocks[currentUserId] !== undefined ? userStocks[currentUserId] : 0;
+            return {
+              ...p,
+              userStocks: {
+                ...userStocks,
+                [currentUserId]: Math.max(0, currentStock - cartItem.quantity)
+              }
+            };
+          }
         }
         return p;
       });
@@ -914,16 +945,23 @@ export default function App() {
       newInvoice.items.forEach(item => {
         const p = products.find(prod => prod.id === item.productId);
         if (p) {
-          const userStocks = p.userStocks || {};
-          const currentUserId = currentUser.id;
-          const currentStock = userStocks[currentUserId] !== undefined ? userStocks[currentUserId] : 0;
-          syncUpsert('products', {
-            ...p,
-            userStocks: {
-              ...userStocks,
-              [currentUserId]: Math.max(0, currentStock - item.quantity)
-            }
-          });
+          if (newInvoice.cashierName === 'Portal Online') {
+            syncUpsert('products', {
+              ...p,
+              stock: Math.max(0, p.stock - item.quantity)
+            });
+          } else {
+            const userStocks = p.userStocks || {};
+            const currentUserId = currentUser?.id || 'admin';
+            const currentStock = userStocks[currentUserId] !== undefined ? userStocks[currentUserId] : 0;
+            syncUpsert('products', {
+              ...p,
+              userStocks: {
+                ...userStocks,
+                [currentUserId]: Math.max(0, currentStock - item.quantity)
+              }
+            });
+          }
         }
       });
       if (newInvoice.paymentMethod === 'Crédito') {
@@ -1394,6 +1432,7 @@ export default function App() {
   const navLinks = [
     { id: 'dashboard', label: 'Dashboard', icon: TrendingUp, color: 'text-cyber-pink', shortcut: 'Ctrl+D' },
     { id: 'facturacion', label: 'Facturación / Despacho', icon: ShoppingCart, color: 'text-cyber-orange', shortcut: 'Ctrl+F' },
+    { id: 'compras_web', label: 'Compras Web', icon: Globe, color: 'text-cyber-pink' },
     { id: 'historial_facturas', label: 'Historial de Facturas', icon: FileText, color: 'text-cyber-pink' },
     { id: 'domicilios', label: 'Domicilios / Mensajería', icon: Truck, color: 'text-cyber-pink' },
     { id: 'clientes', label: 'Clientes', icon: Users, color: 'text-cyber-pink', shortcut: 'Ctrl+C' },
@@ -1785,6 +1824,67 @@ export default function App() {
             </span>
           </div>
 
+          {/* Notification Bell */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+              className="relative flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all"
+              title="Notificaciones de Compras Web"
+            >
+              <span className="text-sm">🔔</span>
+              {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-[#E82E3E] text-white text-[8px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center animate-bounce shadow-md">
+                  {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length}
+                </span>
+              )}
+            </button>
+            {showNotifDropdown && (
+              <div className="absolute right-0 mt-2 w-72 bg-cyber-card border border-cyber-border rounded-xl shadow-2xl z-50 p-2 space-y-1.5 max-h-80 overflow-y-auto backdrop-blur-md">
+                <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-slate-800 pb-1.5 mb-1.5 px-2 flex justify-between items-center">
+                  <span>Alertas de Compras Web</span>
+                  <span className="text-cyber-pink bg-cyber-pink/10 px-1.5 rounded-full font-mono">
+                    {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length} Nuevas
+                  </span>
+                </div>
+                {invoices.filter(inv => inv.cashierName === 'Portal Online').slice(0, 10).map(inv => (
+                  <button
+                    key={inv.id}
+                    onClick={() => {
+                      setActiveTab('compras_web');
+                      setShowNotifDropdown(false);
+                    }}
+                    className={`w-full text-left p-2 rounded-lg text-[10px] font-mono border transition-all hover:bg-slate-900/50 flex flex-col gap-0.5 ${
+                      inv.deliveryStatus === 'Pendiente'
+                        ? 'border-cyber-pink/40 bg-cyber-pink/5 text-white'
+                        : 'border-slate-800 text-gray-400'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-extrabold text-cyber-pink">{inv.invoiceNumber}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                        inv.paymentStatus === 'Pagado' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-400/10 text-amber-400 border border-amber-400/20'
+                      }`}>
+                        {inv.paymentMethod}
+                      </span>
+                    </div>
+                    <div className="truncate font-sans font-medium text-gray-200">
+                      Cliente: {inv.clientName}
+                    </div>
+                    <div className="flex justify-between text-[8px] text-gray-500 mt-0.5">
+                      <span>{new Date(inv.createdAt).toLocaleTimeString()}</span>
+                      <span className="uppercase text-cyber-orange">{inv.deliveryStatus === 'Pendiente' ? 'Por Empacar' : inv.deliveryStatus}</span>
+                    </div>
+                  </button>
+                ))}
+                {invoices.filter(inv => inv.cashierName === 'Portal Online').length === 0 && (
+                  <div className="py-6 text-center text-gray-600 text-[10px] italic">
+                    Sin notificaciones de compras
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Fullscreen Toggle Button */}
           <button 
             onClick={toggleFullscreen}
@@ -1949,6 +2049,14 @@ export default function App() {
 
           {activeTab === 'domicilios' && getUserPermissions(currentUser).domicilios !== false && (
             <Domicilios 
+              invoices={invoices}
+              config={config}
+              onUpdateInvoice={handleUpdateInvoice}
+            />
+          )}
+
+          {activeTab === 'compras_web' && getUserPermissions(currentUser).compras_web !== false && (
+            <ComprasWeb 
               invoices={invoices}
               config={config}
               onUpdateInvoice={handleUpdateInvoice}
