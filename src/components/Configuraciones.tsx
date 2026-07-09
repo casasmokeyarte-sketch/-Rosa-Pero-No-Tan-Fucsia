@@ -569,6 +569,76 @@ export default function Configuraciones({
     downloadCSV(csv, `reporte_turnos_caja_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
+  const handleRegisterBiometric = async () => {
+    try {
+      if (!window.PublicKeyCredential) {
+        alert("Tu navegador o dispositivo no soporta biometría/Passkeys.");
+        return;
+      }
+      
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const createOptions: CredentialCreationOptions = {
+        publicKey: {
+          challenge,
+          rp: { name: "Rosa Pero No Tan Fucsia" },
+          user: {
+            id: new TextEncoder().encode(currentUser.id),
+            name: currentUser.username,
+            displayName: currentUser.fullName
+          },
+          pubKeyCredParams: [
+            { type: "public-key", alg: -7 },
+            { type: "public-key", alg: -257 }
+          ],
+          timeout: 60000,
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required"
+          }
+        }
+      };
+
+      const credential = (await navigator.credentials.create(createOptions)) as PublicKeyCredential;
+      if (credential) {
+        const rawId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+        const updatedUser: User = {
+          ...currentUser,
+          passkeyCredential: {
+            id: credential.id,
+            rawId: rawId,
+            type: credential.type
+          }
+        };
+        onUpdateUser(updatedUser);
+        alert("🔒 ¡Sensor biométrico registrado con éxito en este dispositivo!");
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (confirm("No se pudo completar el registro biométrico real (esto puede ocurrir en entornos locales HTTP). ¿Desea registrar una credencial biométrica simulada para probar el diseño visual de acceso rápido?")) {
+        const updatedUser: User = {
+          ...currentUser,
+          passkeyCredential: {
+            id: "simulated-passkey-" + Date.now(),
+            rawId: "simulated",
+            type: "public-key-simulated"
+          }
+        };
+        onUpdateUser(updatedUser);
+      }
+    }
+  };
+
+  const handleRemoveBiometric = () => {
+    if (confirm("¿Está seguro de eliminar la llave de acceso biométrica de este dispositivo?")) {
+      const updatedUser: User = {
+        ...currentUser,
+        passkeyCredential: null
+      };
+      onUpdateUser(updatedUser);
+    }
+  };
+
   return (
     <div className="space-y-6" id="configurations-module">
       
