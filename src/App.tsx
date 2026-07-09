@@ -1085,6 +1085,7 @@ export default function App() {
   const handleDeleteProduct = (productId: string) => {
     setProducts(prev => prev.filter(p => p.id !== productId));
     showToast(`Insumo eliminado del inventario con éxito`, "warning");
+    if (isSupabaseEnabled) syncDelete('products', productId);
   };
 
   const handleImportProducts = (imported: Product[]) => {

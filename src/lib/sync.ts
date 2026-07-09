@@ -1,10 +1,12 @@
 import { supabase } from './supabase';
 
 export function toSnakeCase(str: string): string {
+  if (str === 'specialPrice1g') return 'special_price_1g';
   return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
 }
 
 export function toCamelCase(str: string): string {
+  if (str === 'special_price_1g') return 'specialPrice1g';
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
