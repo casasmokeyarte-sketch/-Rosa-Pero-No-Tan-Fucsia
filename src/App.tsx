@@ -568,21 +568,21 @@ export default function App() {
     setLoginError(null);
 
     const clientToLogin = clients.find(
-      c => c.rut.trim() === clientLoginRut.trim() || c.phone.trim() === clientLoginRut.trim()
+      c => c.code && c.code.trim().toUpperCase() === clientLoginRut.trim().toUpperCase()
     );
     if (!clientToLogin) {
-      setLoginError("IDENTIDAD NO REGISTRADA: El NIT/RUT o Teléfono no está registrado.");
+      setLoginError("CÓDIGO DE CLIENTE NO REGISTRADO: Verifica el código provisto por tu asesor.");
       return;
     }
 
-    const expectedPassword = clientToLogin.password;
-    if (expectedPassword && clientLoginPassword === expectedPassword) {
+    const expectedPassword = clientToLogin.password || '1234';
+    if (clientLoginPassword === expectedPassword) {
       setCurrentClient(clientToLogin);
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
     } else {
-      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida o contraseña no establecida.");
+      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida.");
     }
   };
 
@@ -1647,10 +1647,10 @@ export default function App() {
                 /* MANUAL CLIENT LOGIN FORM */
                 <form onSubmit={handleClientLoginSubmit} className="space-y-4 font-mono text-xs">
                   <div className="space-y-1">
-                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono font-bold">Identificación RUT / NIT:</label>
+                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider font-mono font-bold">Código de Cliente Único:</label>
                     <input 
                       type="text" 
-                      placeholder="Ej: 901.442.111-4"
+                      placeholder="Ej: CL-1402"
                       value={clientLoginRut}
                       onChange={e => {
                         setClientLoginRut(e.target.value);
@@ -1666,7 +1666,7 @@ export default function App() {
                     <div className="relative">
                       <input 
                         type={showClientPassword ? "text" : "password"} 
-                        placeholder="Ingrese su contraseña..."
+                        placeholder="Contraseña (Por defecto: 1234)..."
                         value={clientLoginPassword}
                         onChange={e => {
                           setClientLoginPassword(e.target.value);

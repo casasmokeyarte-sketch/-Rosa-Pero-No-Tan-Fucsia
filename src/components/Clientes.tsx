@@ -60,6 +60,7 @@ export default function Clientes({
   const [clientCreditLimit, setClientCreditLimit] = useState(2000);
   const [clientPassword, setClientPassword] = useState('');
   const [showClientPwd, setShowClientPwd] = useState(false);
+  const [createdClientCode, setCreatedClientCode] = useState<string | null>(null);
 
   // Edit client reference
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -68,7 +69,8 @@ export default function Clientes({
   const filteredClients = clients.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 
     c.rut.includes(search) || 
-    c.email.toLowerCase().includes(search.toLowerCase())
+    c.email.toLowerCase().includes(search.toLowerCase()) ||
+    (c.code && c.code.toLowerCase().includes(search.toLowerCase()))
   );
 
   // Get specific client invoices
@@ -92,6 +94,15 @@ export default function Clientes({
     e.preventDefault();
     if (!clientName || !clientRut) return;
 
+    // Generate unique non-contiguous client code (e.g. CL-XXXX)
+    let generatedCode = '';
+    let isUnique = false;
+    while (!isUnique) {
+      const randNum = Math.floor(1000 + Math.random() * 9000);
+      generatedCode = `CL-${randNum}`;
+      isUnique = !clients.some(c => c.code === generatedCode);
+    }
+
     const newClient: Client = {
       id: `c-${Date.now()}`,
       name: clientName,
@@ -103,10 +114,12 @@ export default function Clientes({
       creditLimit: parseFloat(clientCreditLimit.toString()) || 1000,
       outstandingBalance: 0,
       createdAt: new Date().toISOString(),
-      password: clientPassword.trim()
+      password: '1234', // Default opening password
+      code: generatedCode
     };
 
     onAddClient(newClient);
+    setCreatedClientCode(generatedCode);
     
     // Clear form
     setClientName('');
@@ -139,6 +152,17 @@ export default function Clientes({
     e.preventDefault();
     if (!editingClient) return;
 
+    // Keep or generate unique code for backward compatibility
+    let code = editingClient.code;
+    if (!code) {
+      let isUnique = false;
+      while (!isUnique) {
+        const randNum = Math.floor(1000 + Math.random() * 9000);
+        code = `CL-${randNum}`;
+        isUnique = !clients.some(c => c.code === code);
+      }
+    }
+
     const updated: Client = {
       ...editingClient,
       name: clientName,
@@ -149,7 +173,8 @@ export default function Clientes({
       address: clientAddress,
       creditLimit: parseFloat(clientCreditLimit.toString()),
       outstandingBalance: editingClient.outstandingBalance,
-      password: clientPassword.trim() || editingClient.password || ''
+      password: clientPassword.trim() || editingClient.password || '1234',
+      code
     };
 
     onUpdateClient(updated);
@@ -315,9 +340,12 @@ export default function Clientes({
                   }`}
                 >
                   <div>
-                    <h3 className="text-xs font-bold text-white">{c.name}</h3>
+                    <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      {c.name}
+                      <span className="text-[9px] text-cyber-pink font-mono">({c.code || 'N/D'})</span>
+                    </h3>
                     <div className="text-[10px] text-gray-400 font-mono mt-1">RUT: {c.rut}</div>
-                    <div className="text-[9px] text-gray-500 mt-1 font-mono">
+                    <div className="text-[9px] text-gray-500 mt-0.5 font-mono">
                       {invoicesCount} Facturas despachadas
                     </div>
                   </div>
@@ -346,7 +374,10 @@ export default function Clientes({
               {/* Profile Header */}
               <div className="flex flex-col sm:flex-row justify-between items-start gap-4 border-b border-cyber-border pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white uppercase">{selectedClient.name}</h2>
+                  <h2 className="text-lg font-bold text-white uppercase flex items-center gap-2">
+                    {selectedClient.name}
+                    <span className="text-xs bg-slate-900 border border-slate-800 text-cyber-pink px-2 py-0.5 rounded font-mono font-bold tracking-widest uppercase">{selectedClient.code || 'N/D'}</span>
+                  </h2>
                   <p className="text-xs text-cyber-pink font-mono mt-0.5">Ficha de Auditoría Comercial</p>
                 </div>
                 
@@ -473,6 +504,7 @@ export default function Clientes({
             <div>
               <p className="font-bold">CLIENTE:</p>
               <p className="text-sm font-bold mt-1">{selectedClient.name}</p>
+              <p>CÓDIGO ÚNICO: {selectedClient.code || 'N/D'}</p>
               <p>{selectedClient.documentType || 'DOC'}: {selectedClient.rut}</p>
               <p>EMAIL: {selectedClient.email}</p>
               <p>TELÉFONO: {selectedClient.phone}</p>
@@ -625,32 +657,9 @@ export default function Clientes({
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-gray-400 font-mono flex items-center gap-1">
-                  Contraseña del Portal Cliente
-                  <span className="text-red-500 text-[9px]">* (Requerido)</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showClientPwd ? 'text' : 'password'}
-                    value={clientPassword}
-                    onChange={e => setClientPassword(e.target.value)}
-                    placeholder="Defina una clave de acceso al portal de cliente..."
-                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 pr-9 rounded-lg text-white text-xs focus:outline-none glow-border-pink tracking-wide font-mono"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowClientPwd(p => !p)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
-                  >
-                    {showClientPwd ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                    )}
-                  </button>
-                </div>
+              <div className="bg-slate-900/60 border border-slate-800 p-3 rounded-lg text-[10px] text-gray-400 space-y-1 font-mono">
+                <p className="font-bold text-cyber-pink uppercase">🔑 Contraseña de Apertura:</p>
+                <p>La contraseña inicial para este cliente será fijada en <strong className="text-white">1234</strong>. Al ingresar por primera vez, el sistema le exigirá definir su propia contraseña personal.</p>
               </div>
 
               <div className="flex gap-2 justify-end pt-4">
@@ -889,6 +898,33 @@ export default function Clientes({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CODE CONFIRMATION MODAL */}
+      {createdClientCode && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-cyber-card border border-cyber-border rounded-2xl p-6 max-w-sm w-full space-y-4 text-center font-mono">
+            <div className="w-12 h-12 bg-cyber-pink/20 border border-cyber-pink/40 rounded-full flex items-center justify-center mx-auto text-cyber-pink animate-bounce text-xl">✓</div>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">¡Cliente Registrado con Éxito!</h3>
+            <p className="text-[10px] text-gray-400">Entregue el siguiente código único al cliente para que acceda al portal:</p>
+            
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-900 text-lg font-bold text-cyber-pink tracking-widest text-center select-all">
+              {createdClientCode}
+            </div>
+
+            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 text-[9px] text-gray-500 text-left space-y-1">
+              <p>• <strong>Código de Acceso:</strong> {createdClientCode}</p>
+              <p>• <strong>Contraseña Inicial:</strong> 1234 (Se le pedirá cambiarla al ingresar)</p>
+            </div>
+
+            <button
+              onClick={() => setCreatedClientCode(null)}
+              className="w-full py-2 bg-cyber-pink text-black hover:bg-cyber-accent rounded-lg font-bold text-xs"
+            >
+              ENTENDIDO Y COPIAR
+            </button>
           </div>
         </div>
       )}

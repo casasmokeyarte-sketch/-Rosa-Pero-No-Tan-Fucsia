@@ -81,6 +81,47 @@ export default function PortalCliente({
   const [notifTone, setNotifTone] = useState(client.notifSoundTone || 'Predeterminado');
   const [soundSaveSuccess, setSoundSaveSuccess] = useState(false);
 
+  // Password force change & settings states
+  const [mustChangePassword, setMustChangePassword] = useState(client.password === '1234');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // Settings voluntary password change states
+  const [settingsNewPassword, setSettingsNewPassword] = useState('');
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState('');
+  const [settingsPasswordError, setSettingsPasswordError] = useState<string | null>(null);
+  const [settingsPasswordSuccess, setSettingsPasswordSuccess] = useState(false);
+
+  const handleSettingsPasswordChange = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsPasswordError(null);
+    setSettingsPasswordSuccess(false);
+
+    if (!settingsNewPassword.trim()) {
+      setSettingsPasswordError("La contraseña no puede estar vacía.");
+      return;
+    }
+    if (settingsNewPassword.trim() === '1234') {
+      setSettingsPasswordError("Debe elegir una contraseña diferente a 1234.");
+      return;
+    }
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      setSettingsPasswordError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    const updatedClient: Client = {
+      ...client,
+      password: settingsNewPassword.trim()
+    };
+    onUpdateClient(updatedClient);
+    setSettingsPasswordSuccess(true);
+    setSettingsNewPassword('');
+    setSettingsConfirmPassword('');
+    setTimeout(() => setSettingsPasswordSuccess(false), 4000);
+  };
+
   // Client Flash message popup modal trigger state
   const [activeFlashPopup, setActiveFlashPopup] = useState<FlashMessage | null>(null);
 
@@ -548,6 +589,104 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
     return matchesSearch && matchesCat;
   });
 
+  if (mustChangePassword) {
+    const handleForceChangePassword = (e: React.FormEvent) => {
+      e.preventDefault();
+      setPasswordError(null);
+
+      if (!newPassword.trim()) {
+        setPasswordError("La contraseña no puede estar vacía.");
+        return;
+      }
+      if (newPassword.trim() === '1234') {
+        setPasswordError("Debe elegir una contraseña diferente a la clave de apertura temporal (1234).");
+        return;
+      }
+      if (newPassword !== confirmNewPassword) {
+        setPasswordError("Las contraseñas no coinciden. Verifique e intente de nuevo.");
+        return;
+      }
+
+      const updatedClient: Client = {
+        ...client,
+        password: newPassword.trim()
+      };
+      onUpdateClient(updatedClient);
+      showToast("🔒 ¡Contraseña actualizada con éxito! Bienvenido al portal.", "success");
+      setMustChangePassword(false);
+    };
+
+    return (
+      <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex items-center justify-center relative overflow-hidden scanlines p-4">
+        <div 
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none opacity-[0.12] mix-blend-lighten"
+          style={{ backgroundImage: `url('/images/logo_cyberpunk_1783131526095.jpg')` }}
+        ></div>
+
+        <div className="bg-cyber-card/95 border border-cyber-border rounded-2xl max-w-md w-full p-6 sm:p-8 space-y-6 relative z-10 shadow-2xl neon-shadow-pink font-mono text-xs">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-xl bg-cyber-pink/20 border border-cyber-pink/40 flex items-center justify-center mx-auto text-cyber-pink text-xl animate-pulse">🔒</div>
+            <h2 className="text-sm font-black text-white tracking-widest uppercase">CAMBIO OBLIGATORIO DE CONTRASEÑA</h2>
+            <p className="text-[9px] text-gray-400">Por motivos de seguridad, debe cambiar la contraseña de apertura antes de ingresar por primera vez.</p>
+          </div>
+
+          <form onSubmit={handleForceChangePassword} className="space-y-4">
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-900 space-y-1">
+              <p className="text-[10px] text-gray-500"><strong>Código Único de Cliente:</strong></p>
+              <p className="text-sm font-bold text-white tracking-wider">{client.code || 'N/D'}</p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Nueva Contraseña Personal:</label>
+              <input
+                type="password"
+                placeholder="Escribe tu nueva clave personal..."
+                value={newPassword}
+                onChange={e => { setNewPassword(e.target.value); setPasswordError(null); }}
+                className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Confirmar Contraseña:</label>
+              <input
+                type="password"
+                placeholder="Repite tu nueva clave personal..."
+                value={confirmNewPassword}
+                onChange={e => { setConfirmNewPassword(e.target.value); setPasswordError(null); }}
+                className="bg-cyber-bg border border-cyber-border text-white text-xs p-3 rounded-lg w-full focus:outline-none glow-border-pink tracking-wide font-mono"
+                required
+              />
+            </div>
+
+            {passwordError && (
+              <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded text-red-400 text-[10px] leading-relaxed font-sans">
+                🚨 {passwordError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="submit"
+                className="py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent font-bold font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
+              >
+                CAMBIAR Y ENTRAR
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="py-3 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white font-bold font-mono text-xs transition-all cursor-pointer"
+              >
+                CERRAR SESIÓN
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex flex-col relative overflow-x-hidden scanlines">
       {/* Background visual art element */}
@@ -575,7 +714,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
               ROSA FUERTE <span className="text-cyber-pink text-xs font-bold">[CLIENT PORTAL]</span>
             </h1>
             <p className="text-[10px] text-gray-400 font-mono tracking-wider">
-              Autenticado como: <span className="text-cyber-pink font-bold">{client.name}</span>
+              Autenticado como: <span className="text-cyber-pink font-bold">{client.name}</span> <span className="text-gray-500 font-mono text-[9px]">({client.code || 'N/D'})</span>
             </p>
           </div>
         </div>
@@ -607,6 +746,10 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
               CLIENTE VIP
             </div>
             <div className="space-y-4">
+              <div>
+                <span className="text-[9px] text-gray-500 font-mono block uppercase">CÓDIGO ÚNICO DE CLIENTE</span>
+                <span className="text-xs font-mono font-bold text-cyber-pink select-all">{client.code || 'N/D'}</span>
+              </div>
               <div>
                 <span className="text-[9px] text-gray-500 font-mono block uppercase">RUT/NIT IDENTIDAD</span>
                 <span className="text-xs font-mono font-bold text-white">{client.rut}</span>
@@ -1722,6 +1865,53 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                   <p className="text-[9px] text-gray-500 leading-normal">
                     Este sonido se reproducirá cuando se completen tus pedidos online o se emitan anuncios flash.
                   </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-900/60">
+                {/* Change password card */}
+                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3 col-span-1 md:col-span-2">
+                  <label className="block text-[11px] text-cyber-pink font-bold uppercase tracking-wider">
+                    Cambiar Contraseña del Portal:
+                  </label>
+                  <form onSubmit={handleSettingsPasswordChange} className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <span className="text-[9px] text-gray-500 font-mono">Nueva Contraseña Personal:</span>
+                        <input
+                          type="password"
+                          placeholder="Nueva contraseña..."
+                          value={settingsNewPassword}
+                          onChange={e => setSettingsNewPassword(e.target.value)}
+                          className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded text-white text-xs focus:outline-none"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[9px] text-gray-500 font-mono">Confirmar Nueva Contraseña:</span>
+                        <input
+                          type="password"
+                          placeholder="Confirmar contraseña..."
+                          value={settingsConfirmPassword}
+                          onChange={e => setSettingsConfirmPassword(e.target.value)}
+                          className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded text-white text-xs focus:outline-none"
+                          required
+                        />
+                      </div>
+                    </div>
+                    {settingsPasswordError && (
+                      <p className="text-red-400 text-[10px]">🚨 {settingsPasswordError}</p>
+                    )}
+                    {settingsPasswordSuccess && (
+                      <p className="text-cyber-green text-[10px]">✓ Contraseña actualizada correctamente.</p>
+                    )}
+                    <button
+                      type="submit"
+                      className="bg-slate-900 hover:bg-slate-800 text-white border border-cyber-border px-4 py-2 rounded text-[10px] font-bold font-mono transition-all cursor-pointer"
+                    >
+                      Actualizar Contraseña
+                    </button>
+                  </form>
                 </div>
               </div>
 

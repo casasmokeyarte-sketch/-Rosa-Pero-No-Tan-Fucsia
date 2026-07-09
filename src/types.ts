@@ -14,6 +14,7 @@ export interface Client {
   password?: string;
   chatSoundTone?: string;
   notifSoundTone?: string;
+  code?: string;
 }
 
 export interface Product {

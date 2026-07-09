@@ -266,7 +266,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Venta Directa de Caja",
     creditLimit: 0,
     outstandingBalance: 0,
-    createdAt: "2026-01-01T00:00:00-05:00"
+    createdAt: "2026-01-01T00:00:00-05:00",
+    code: "CL-9081",
+    password: "1234"
   },
   {
     id: "c-1",
@@ -277,7 +279,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Torre Principal de Innovación, Piso 42",
     creditLimit: 2500000.00,
     outstandingBalance: 850000.00, // Credited Graphene Shield
-    createdAt: "2026-01-15T08:00:00-05:00"
+    createdAt: "2026-01-15T08:00:00-05:00",
+    code: "CL-1402",
+    password: "1234"
   },
   {
     id: "c-2",
@@ -288,7 +292,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Hangar de Tránsito, Autopista de Ceniza Km 12",
     creditLimit: 1000000.00,
     outstandingBalance: 0.00,
-    createdAt: "2026-02-10T10:30:00-05:00"
+    createdAt: "2026-02-10T10:30:00-05:00",
+    code: "CL-7839",
+    password: "1234"
   },
   {
     id: "c-3",
@@ -299,7 +305,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Domo de Investigación Médica #3",
     creditLimit: 5000000.00,
     outstandingBalance: 450000.00, // Credit for fission battery
-    createdAt: "2026-03-01T14:15:00-05:00"
+    createdAt: "2026-03-01T14:15:00-05:00",
+    code: "CL-5056",
+    password: "1234"
   },
   {
     id: "c-4",
@@ -310,7 +318,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Subnivel 4, Laboratorios Black Mesa",
     creditLimit: 500000.00,
     outstandingBalance: 120000.00, // Pending Bio-modulator serum
-    createdAt: "2026-04-18T11:00:00-05:00"
+    createdAt: "2026-04-18T11:00:00-05:00",
+    code: "CL-6241",
+    password: "1234"
   },
   {
     id: "c-5",
@@ -321,7 +331,9 @@ export const INITIAL_CLIENTS: Client[] = [
     address: "Distrito Financiero de Neón, Of. 909",
     creditLimit: 3000000.00,
     outstandingBalance: 0.00,
-    createdAt: "2026-05-22T09:45:00-05:00"
+    createdAt: "2026-05-22T09:45:00-05:00",
+    code: "CL-8873",
+    password: "1234"
   }
 ];
 
