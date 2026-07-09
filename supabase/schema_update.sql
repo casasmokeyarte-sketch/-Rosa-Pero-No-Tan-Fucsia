@@ -130,3 +130,16 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_origin ON stock_transfers(origin);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_destination ON stock_transfers(destination);
 
+
+-- ============================================================
+-- 8. Columna 'code' en la tabla 'clients' para Código de Acceso Único
+-- ============================================================
+ALTER TABLE clients 
+ADD COLUMN IF NOT EXISTS code text;
+
+-- Generar códigos aleatorios únicos (CL-XXXX) para clientes existentes que no tengan código
+UPDATE clients 
+SET code = 'CL-' || floor(random() * 9000 + 1000)::text 
+WHERE code IS NULL;
+
+
