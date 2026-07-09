@@ -23,7 +23,9 @@ const SKIP_RECURSION_KEYS = new Set([
   'payment_methods',
   'product_categories',
   'user_stocks',
-  'active_days'
+  'active_days',
+  'passkeyCredential',
+  'passkey_credential'
 ]);
 
 export function mapKeys(obj: any, mapper: (s: string) => string): any {

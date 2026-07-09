@@ -132,10 +132,14 @@ CREATE INDEX IF NOT EXISTS idx_stock_transfers_destination ON stock_transfers(de
 
 
 -- ============================================================
--- 8. Columna 'code' en la tabla 'clients' para Código de Acceso Único
+-- 8. Columna 'code' en la tabla 'clients' para Código de Acceso Único y Credenciales Biométricas
 -- ============================================================
 ALTER TABLE clients 
-ADD COLUMN IF NOT EXISTS code text;
+ADD COLUMN IF NOT EXISTS code text,
+ADD COLUMN IF NOT EXISTS passkey_credential jsonb;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS passkey_credential jsonb;
 
 -- Generar códigos aleatorios únicos (CL-XXXX) para clientes existentes que no tengan código
 UPDATE clients 

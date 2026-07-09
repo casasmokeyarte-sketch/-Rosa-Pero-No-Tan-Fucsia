@@ -26,7 +26,8 @@ import {
   Shield,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  Fingerprint
 } from 'lucide-react';
 
 interface ConfiguracionesProps {
@@ -569,7 +570,7 @@ export default function Configuraciones({
   };
 
   return (
-    <div className="space-y-6" id="settings-module">
+    <div className="space-y-6" id="configurations-module">
       
       {/* Module Title */}
       <div className="bg-cyber-card border border-cyber-border rounded-xl p-5">
@@ -1275,6 +1276,42 @@ export default function Configuraciones({
         {/* RIGHT: Export Center & Emergency Reset (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           
+          {/* Biometric Passkey Registration */}
+          <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-4">
+            <h2 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5 border-b border-cyber-border pb-3">
+              <Fingerprint size={15} className="text-cyber-pink" />
+              LLAVE DE ACCESO BIOMÉTRICA (PASSKEY)
+            </h2>
+            <p className="text-[11px] text-gray-400 leading-normal font-mono">
+              Vincula el sensor de huellas dactilares o reconocimiento facial de este dispositivo (Windows Hello / FaceID / TouchID) para autenticarte instantáneamente en el búnker sin digitar tu PIN o contraseña.
+            </p>
+
+            {currentUser.passkeyCredential ? (
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-cyber-blue/10 border border-cyber-blue/20 p-3 rounded-lg text-xs font-mono">
+                <div>
+                  <p className="text-[10px] text-cyber-blue font-bold">✓ SENSOR VINCULADO ACTIVAMENTE</p>
+                  <p className="text-[9px] text-gray-400 mt-0.5">ID: {currentUser.passkeyCredential.id?.substring(0, 15)}...</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveBiometric}
+                  className="text-[9px] bg-red-950/40 border border-red-500/30 hover:bg-red-900/40 text-red-400 px-2 py-1.5 rounded-lg cursor-pointer transition-all"
+                >
+                  Desvincular Llave
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleRegisterBiometric}
+                className="w-full py-2.5 bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-all neon-shadow-pink"
+              >
+                <Fingerprint size={14} />
+                <span>Registrar Huella / Rostro en este Equipo</span>
+              </button>
+            )}
+          </div>
+
           {/* JSON Manual Database Backup & Restore */}
           <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-4">
             <h2 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5 border-b border-cyber-border pb-3">

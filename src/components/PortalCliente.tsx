@@ -25,7 +25,8 @@ import {
   ShieldAlert,
   Trash2,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Fingerprint
 } from 'lucide-react';
 import AtomBubble from './AtomBubble';
 
@@ -120,6 +121,76 @@ export default function PortalCliente({
     setSettingsNewPassword('');
     setSettingsConfirmPassword('');
     setTimeout(() => setSettingsPasswordSuccess(false), 4000);
+  };
+
+  const handleRegisterBiometric = async () => {
+    try {
+      if (!window.PublicKeyCredential) {
+        alert("Tu navegador o dispositivo no soporta biometría/Passkeys.");
+        return;
+      }
+      
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const createOptions: CredentialCreationOptions = {
+        publicKey: {
+          challenge,
+          rp: { name: "Rosa Pero No Tan Fucsia" },
+          user: {
+            id: new TextEncoder().encode(client.id),
+            name: client.code || client.rut,
+            displayName: client.name
+          },
+          pubKeyCredParams: [
+            { type: "public-key", alg: -7 },
+            { type: "public-key", alg: -257 }
+          ],
+          timeout: 60000,
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required"
+          }
+        }
+      };
+
+      const credential = (await navigator.credentials.create(createOptions)) as PublicKeyCredential;
+      if (credential) {
+        const rawId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+        const updatedClient: Client = {
+          ...client,
+          passkeyCredential: {
+            id: credential.id,
+            rawId: rawId,
+            type: credential.type
+          }
+        };
+        onUpdateClient(updatedClient);
+        alert("🔒 ¡Sensor biométrico registrado con éxito en este dispositivo!");
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (confirm("No se pudo completar el registro biométrico real (esto puede ocurrir en entornos locales HTTP). ¿Desea registrar una credencial biométrica simulada para probar el diseño visual de acceso rápido?")) {
+        const updatedClient: Client = {
+          ...client,
+          passkeyCredential: {
+            id: "simulated-passkey-" + Date.now(),
+            rawId: "simulated",
+            type: "public-key-simulated"
+          }
+        };
+        onUpdateClient(updatedClient);
+      }
+    }
+  };
+
+  const handleRemoveBiometric = () => {
+    if (confirm("¿Está seguro de eliminar la llave de acceso biométrica de este dispositivo?")) {
+      const updatedClient: Client = {
+        ...client,
+        passkeyCredential: null
+      };
+      onUpdateClient(updatedClient);
+    }
   };
 
   // Client Flash message popup modal trigger state
@@ -1870,7 +1941,7 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-900/60">
                 {/* Change password card */}
-                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3 col-span-1 md:col-span-2">
+                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3">
                   <label className="block text-[11px] text-cyber-pink font-bold uppercase tracking-wider">
                     Cambiar Contraseña del Portal:
                   </label>
@@ -1912,6 +1983,42 @@ Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)'
                       Actualizar Contraseña
                     </button>
                   </form>
+                </div>
+
+                {/* Biometric Passkey Registration */}
+                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-900 space-y-3">
+                  <label className="block text-[11px] text-cyber-orange font-bold uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                    <Fingerprint size={14} className="text-cyber-orange" />
+                    Llave de Acceso Biométrica (Passkey):
+                  </label>
+                  <p className="text-[10px] text-gray-500 leading-normal font-mono">
+                    Vincula el sensor de huellas dactilares o reconocimiento facial (FaceID / Windows Hello) de este dispositivo para iniciar sesión automáticamente sin contraseñas.
+                  </p>
+                  
+                  {client.passkeyCredential ? (
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-cyber-blue/10 border border-cyber-blue/20 p-2.5 rounded-lg text-xs font-mono">
+                      <div>
+                        <p className="text-[10px] text-cyber-blue font-bold">✓ DISPOSITIVO REGISTRADO</p>
+                        <p className="text-[9px] text-gray-400 mt-0.5 font-mono">Credencial: {client.passkeyCredential.id?.substring(0, 15)}...</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveBiometric}
+                        className="text-[9px] bg-red-950/40 border border-red-500/30 hover:bg-red-900/40 text-red-400 px-2 py-1 rounded cursor-pointer transition-all"
+                      >
+                        Quitar Llave
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleRegisterBiometric}
+                      className="bg-cyber-orange text-black hover:bg-amber-400 px-4 py-2 rounded text-[10px] font-bold font-mono transition-all cursor-pointer flex items-center gap-1.5 shadow-lg active:scale-95 hover:neon-shadow-orange"
+                    >
+                      <Fingerprint size={12} />
+                      Registrar Sensor de este Dispositivo
+                    </button>
+                  )}
                 </div>
               </div>
 

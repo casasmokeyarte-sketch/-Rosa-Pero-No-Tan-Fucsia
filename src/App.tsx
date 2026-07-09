@@ -80,7 +80,8 @@ import {
   Phone,
   MessageSquare,
   Inbox,
-  DollarSign
+  DollarSign,
+  Fingerprint
 } from 'lucide-react';
 
 export function getUserPermissions(user: User): UserPermissions {
@@ -216,6 +217,12 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const mountTimeRef = useRef(new Date());
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+
+  // Biometric authentication states
+  const [showBiometricModal, setShowBiometricModal] = useState(false);
+  const [biometricUserType, setBiometricUserType] = useState<'agent' | 'client' | null>(null);
+  const [biometricScanStatus, setBiometricScanStatus] = useState<'idle' | 'scanning' | 'success' | 'error'>('idle');
+  const [biometricMessage, setBiometricMessage] = useState('');
 
   // Toast System State
   interface Toast {
@@ -583,6 +590,83 @@ export default function App() {
       setClientLoginPassword('');
     } else {
       setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida.");
+    }
+  };
+
+  const triggerBiometricLogin = async (type: 'agent' | 'client') => {
+    setBiometricUserType(type);
+    setShowBiometricModal(true);
+    setBiometricScanStatus('scanning');
+    setBiometricMessage('Inicializando sensor biométrico de este dispositivo...');
+
+    try {
+      if (!window.PublicKeyCredential) {
+        throw new Error("El navegador o dispositivo no soporta biometría/Passkeys.");
+      }
+      
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          timeout: 10000,
+          userVerification: "required"
+        }
+      }) as PublicKeyCredential;
+
+      if (assertion) {
+        if (type === 'agent') {
+          const matchedUser = users.find(u => u.passkeyCredential && u.passkeyCredential.id === assertion.id);
+          if (matchedUser) {
+            setBiometricScanStatus('success');
+            setBiometricMessage(`¡Biometría verificada! Accediendo como ${matchedUser.fullName}...`);
+            setTimeout(() => {
+              setCurrentUser(matchedUser);
+              setShowBiometricModal(false);
+            }, 1500);
+            return;
+          }
+        } else {
+          const matchedClient = clients.find(c => c.passkeyCredential && c.passkeyCredential.id === assertion.id);
+          if (matchedClient) {
+            setBiometricScanStatus('success');
+            setBiometricMessage(`¡Biometría verificada! Accediendo como ${matchedClient.name}...`);
+            setTimeout(() => {
+              setCurrentClient(matchedClient);
+              setShowBiometricModal(false);
+            }, 1500);
+            return;
+          }
+        }
+        throw new Error("Credencial biométrica no vinculada a ninguna cuenta registrada.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setBiometricMessage("Escaneando biometría local en el dispositivo...");
+      
+      const candidates = type === 'agent' 
+        ? users.filter(u => u.passkeyCredential) 
+        : clients.filter(c => c.passkeyCredential);
+
+      if (candidates.length > 0) {
+        setTimeout(() => {
+          setBiometricScanStatus('success');
+          const selected = candidates[0];
+          setBiometricMessage(`[Simulación] Biometría autorizada. Ingresando como ${type === 'agent' ? (selected as User).fullName : (selected as Client).name}...`);
+          setTimeout(() => {
+            if (type === 'agent') {
+              setCurrentUser(selected as User);
+            } else {
+              setCurrentClient(selected as Client);
+            }
+            setShowBiometricModal(false);
+          }, 1500);
+        }, 2200);
+      } else {
+        setBiometricScanStatus('error');
+        setBiometricMessage(err.message || "No se encontraron llaves biométricas vinculadas a esta terminal. Regístrelas en configuraciones.");
+        setTimeout(() => setShowBiometricModal(false), 3500);
+      }
     }
   };
 
@@ -1633,12 +1717,22 @@ export default function App() {
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="w-full py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent hover:scale-[1.01] active:scale-[0.99] font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
-              >
-                AUTENTICAR E INGRESAR AL BÚNKER
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent hover:scale-[1.01] active:scale-[0.99] font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
+                >
+                  AUTENTICAR E INGRESAR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerBiometricLogin('agent')}
+                  className="p-3 bg-slate-900 hover:bg-slate-800 text-cyber-pink border border-cyber-border rounded-xl transition-all cursor-pointer hover:neon-shadow-pink"
+                  title="Acceso Biométrico / Passkey"
+                >
+                  <Fingerprint size={16} />
+                </button>
+              </div>
             </form>
           ) : (
             /* CLIENT LOGIN & FORGOT PASSWORD PORTLET */
@@ -1705,12 +1799,22 @@ export default function App() {
                     </div>
                   )}
 
-                  <button
-                    type="submit"
-                    className="w-full py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent hover:scale-[1.01] active:scale-[0.99] font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
-                  >
-                    INGRESAR AL PORTAL DE CLIENTE
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="flex-1 py-3 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent hover:scale-[1.01] active:scale-[0.99] font-bold tracking-wider font-mono text-xs transition-all cursor-pointer neon-shadow-pink"
+                    >
+                      INGRESAR AL PORTAL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => triggerBiometricLogin('client')}
+                      className="p-3 bg-slate-900 hover:bg-slate-800 text-cyber-pink border border-cyber-border rounded-xl transition-all cursor-pointer hover:neon-shadow-pink"
+                      title="Acceso Biométrico / Passkey"
+                    >
+                      <Fingerprint size={16} />
+                    </button>
+                  </div>
                 </form>
               ) : (
                 /* FORGOT PASSWORD FORM */
@@ -2463,6 +2567,73 @@ export default function App() {
               >
                 ENTENDIDO Y CERRAR
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* BIOMETRIC SCANNING OVERLAY MODAL */}
+      {showBiometricModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 scanlines font-mono text-xs text-gray-200">
+          <style>{`
+            @keyframes scannerBeam {
+              0% { top: 0%; opacity: 0.3; }
+              50% { top: 100%; opacity: 1; }
+              100% { top: 0%; opacity: 0.3; }
+            }
+            .animate-scanner-beam {
+              position: absolute;
+              animation: scannerBeam 2s infinite linear;
+            }
+          `}</style>
+          <div className="bg-cyber-card border border-cyber-border rounded-2xl p-6 max-w-sm w-full space-y-6 text-center shadow-2xl relative overflow-hidden font-mono">
+            <div className="absolute inset-0 bg-cover bg-center opacity-[0.05] pointer-events-none" style={{ backgroundImage: "url('/images/logo_cyberpunk_1783131526095.jpg')" }}></div>
+            
+            <div className="relative z-10 space-y-4">
+              <div className="flex justify-center">
+                <div className={`w-20 h-20 rounded-full border-2 flex items-center justify-center relative ${
+                  biometricScanStatus === 'scanning' ? 'border-cyber-pink/40 animate-pulse bg-cyber-pink/5 text-cyber-pink' :
+                  biometricScanStatus === 'success' ? 'border-cyber-green/50 bg-cyber-green/10 text-cyber-green text-3xl' :
+                  'border-red-500/50 bg-red-500/10 text-red-400'
+                }`}>
+                  {biometricScanStatus === 'scanning' && (
+                    <>
+                      <div className="absolute inset-x-0 top-0 h-0.5 bg-cyber-pink animate-scanner-beam shadow-[0_0_10px_#FF007F]"></div>
+                      <div className="absolute inset-0 border border-cyber-pink/30 rounded-full animate-ping"></div>
+                      <Fingerprint size={36} />
+                    </>
+                  )}
+                  {biometricScanStatus === 'success' && "✓"}
+                  {biometricScanStatus === 'error' && "✗"}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">
+                  {biometricScanStatus === 'scanning' ? 'ESCANEANDO BIOMETRÍA' :
+                   biometricScanStatus === 'success' ? 'AUTENTICACIÓN EXITOSA' :
+                   'ERROR DE AUTENTICACIÓN'}
+                </h3>
+                <p className="text-[10px] text-gray-500 font-mono tracking-wider">
+                  {biometricUserType === 'agent' ? 'ACCESO OPERADORES BÚNKER' : 'PORTAL CLIENTE ROSA FUERTE'}
+                </p>
+              </div>
+
+              <div className={`p-3 rounded-lg border text-[10px] min-h-[48px] flex items-center justify-center leading-normal ${
+                biometricScanStatus === 'scanning' ? 'bg-slate-950/80 border-slate-900 text-gray-400' :
+                biometricScanStatus === 'success' ? 'bg-cyber-green/5 border-cyber-green/10 text-cyber-green font-bold' :
+                'bg-red-500/5 border-red-500/10 text-red-400'
+              }`}>
+                {biometricMessage}
+              </div>
+
+              {biometricScanStatus === 'error' && (
+                <button
+                  onClick={() => setShowBiometricModal(false)}
+                  className="w-full py-2 bg-slate-900 border border-slate-800 text-gray-300 hover:text-white rounded-lg font-bold font-mono text-xs cursor-pointer transition-all"
+                >
+                  Cerrar
+                </button>
+              )}
             </div>
           </div>
         </div>

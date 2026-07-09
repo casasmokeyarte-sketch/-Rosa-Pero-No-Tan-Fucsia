@@ -15,6 +15,7 @@ export interface Client {
   chatSoundTone?: string;
   notifSoundTone?: string;
   code?: string;
+  passkeyCredential?: any;
 }
 
 export interface Product {
@@ -229,6 +230,7 @@ export interface User {
   status: 'Activo' | 'Inactivo';
   password?: string;
   permissions?: UserPermissions;
+  passkeyCredential?: any;
 }
 
 export interface BusinessConfig {
