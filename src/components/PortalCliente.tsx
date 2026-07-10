@@ -369,12 +369,22 @@ export default function PortalCliente({
   // 5. Restore pending Bold order on page load if redirect callback params are detected
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('bold_status') === 'success') {
+    const boldTxStatus = params.get('bold-tx-status');
+    const boldStatus = params.get('bold_status');
+    const boldOrderId = params.get('bold-order-id');
+
+    const isApproved = boldStatus === 'success' || 
+                       boldTxStatus === 'approved' || 
+                       boldTxStatus === 'success';
+
+    if (isApproved) {
       const pendingStr = localStorage.getItem('pending_bold_order');
       if (pendingStr) {
         try {
           const pending = JSON.parse(pendingStr);
-          if (pending.client && pending.client.id === client.id) {
+          // Verify client match and (if provided) order ID match
+          const matchesOrder = !boldOrderId || pending.orderNum === boldOrderId;
+          if (pending.client && pending.client.id === client.id && matchesOrder) {
             const invoiceItems = pending.cart.map((item: any) => ({
               productId: item.product.id,
               productName: item.product.name,

@@ -35,9 +35,46 @@ self.addEventListener('activate', (event) => {
 
 // Fetch Event (Required for PWA install trigger)
 self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+
+  // Only handle requests to our own origin
+  if (url.origin !== self.location.origin) return;
+
+  // BOLD payment redirects: do not intercept requests that contain BOLD callback parameters
+  if (
+    url.searchParams.has('bold-tx-status') ||
+    url.searchParams.has('bold-order-id') ||
+    url.searchParams.has('bold_status') ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/v1')
+  ) {
+    return;
+  }
+
   event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request);
+    fetch(event.request).catch(async (error) => {
+      const cachedResponse = await caches.match(event.request);
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      
+      // If it's a navigation request and we're offline, return cached index.html
+      if (event.request.mode === 'navigate') {
+        const indexResponse = await caches.match('/index.html');
+        if (indexResponse) {
+          return indexResponse;
+        }
+      }
+      
+      // Return a fallback response to avoid service worker TypeError
+      return new Response('Network error occurred', {
+        status: 480,
+        statusText: 'Network Error',
+        headers: { 'Content-Type': 'text/plain' }
+      });
     })
   );
 });
