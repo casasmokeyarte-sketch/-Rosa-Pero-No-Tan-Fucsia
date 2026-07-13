@@ -788,23 +788,12 @@ export default function App() {
       try {
         setIsLoadingDB(true);
 
-        // 1. Fetch from Supabase
+        // 1. Fetch essential auth data first
         const dbConfig = await fetchConfig();
         const dbUsers = await fetchTable('users');
-        const dbProducts = await fetchTable('products');
         const dbClients = await fetchTable('clients');
-        const dbInvoices = await fetchTable('invoices');
-        const dbExpenses = await fetchTable('expenses');
-        const dbShifts = await fetchTable('shifts');
-        const dbAdjustments = await fetchTable('stock_adjustments');
-        const dbTransfers = await fetchTable('stock_transfers');
-        const dbChatMessages = await fetchTable('chat_messages');
-        const dbClientRequests = await fetchTable('client_requests');
-        const dbDiscounts = await fetchTable('discounts');
-        const dbFlashMessages = await fetchTable('flash_messages');
-        const dbPayroll = await fetchTable('payroll_entries');
 
-        // 2. Seeding check and upload
+        // Seeding essential data
         if (dbConfig) {
           setConfig(dbConfig);
         } else {
@@ -819,14 +808,6 @@ export default function App() {
           }
         }
 
-        if (dbProducts && dbProducts.length > 0) {
-          setProducts(dbProducts);
-        } else {
-          for (const p of products) {
-            await syncUpsert('products', p);
-          }
-        }
-
         if (dbClients && dbClients.length > 0) {
           setClients(dbClients);
         } else {
@@ -835,91 +816,124 @@ export default function App() {
           }
         }
 
-        if (dbInvoices && dbInvoices.length > 0) {
-          setInvoices(dbInvoices);
-        } else if (invoices.length > 0) {
-          for (const inv of invoices) {
-            await syncUpsert('invoices', inv);
-          }
-        }
+        // Deactivate loading state quickly to show login screen
+        setIsLoadingDB(false);
+        showToast("Enlace de autenticación establecido.", "success");
 
-        if (dbExpenses && dbExpenses.length > 0) {
-          setExpenses(dbExpenses);
-        } else if (expenses.length > 0) {
-          for (const exp of expenses) {
-            await syncUpsert('expenses', exp);
-          }
-        }
+        // 2. Fetch remaining data in the background
+        const loadSecondaryData = async () => {
+          try {
+            const dbProducts = await fetchTable('products');
+            const dbInvoices = await fetchTable('invoices');
+            const dbExpenses = await fetchTable('expenses');
+            const dbShifts = await fetchTable('shifts');
+            const dbAdjustments = await fetchTable('stock_adjustments');
+            const dbTransfers = await fetchTable('stock_transfers');
+            const dbChatMessages = await fetchTable('chat_messages');
+            const dbClientRequests = await fetchTable('client_requests');
+            const dbDiscounts = await fetchTable('discounts');
+            const dbFlashMessages = await fetchTable('flash_messages');
+            const dbPayroll = await fetchTable('payroll_entries');
 
-        if (dbShifts && dbShifts.length > 0) {
-          setShifts(dbShifts);
-        } else if (shifts.length > 0) {
-          for (const sh of shifts) {
-            await syncUpsert('shifts', sh);
-          }
-        }
+            if (dbProducts && dbProducts.length > 0) {
+              setProducts(dbProducts);
+            } else {
+              for (const p of products) {
+                await syncUpsert('products', p);
+              }
+            }
 
-        if (dbAdjustments && dbAdjustments.length > 0) {
-          setAdjustments(dbAdjustments);
-        } else if (adjustments.length > 0) {
-          for (const adj of adjustments) {
-            await syncUpsert('stock_adjustments', adj);
-          }
-        }
+            if (dbInvoices && dbInvoices.length > 0) {
+              setInvoices(dbInvoices);
+            } else if (invoices.length > 0) {
+              for (const inv of invoices) {
+                await syncUpsert('invoices', inv);
+              }
+            }
 
-        if (dbTransfers && dbTransfers.length > 0) {
-          setTransfers(dbTransfers);
-        } else if (transfers.length > 0) {
-          for (const tr of transfers) {
-            await syncUpsert('stock_transfers', tr);
-          }
-        }
+            if (dbExpenses && dbExpenses.length > 0) {
+              setExpenses(dbExpenses);
+            } else if (expenses.length > 0) {
+              for (const exp of expenses) {
+                await syncUpsert('expenses', exp);
+              }
+            }
 
-        if (dbChatMessages && dbChatMessages.length > 0) {
-          setChatMessages(dbChatMessages);
-        } else if (chatMessages.length > 0) {
-          for (const msg of chatMessages) {
-            await syncUpsert('chat_messages', msg);
-          }
-        }
+            if (dbShifts && dbShifts.length > 0) {
+              setShifts(dbShifts);
+            } else if (shifts.length > 0) {
+              for (const sh of shifts) {
+                await syncUpsert('shifts', sh);
+              }
+            }
 
-        if (dbClientRequests && dbClientRequests.length > 0) {
-          setClientRequests(dbClientRequests);
-        } else if (clientRequests.length > 0) {
-          for (const req of clientRequests) {
-            await syncUpsert('client_requests', req);
-          }
-        }
+            if (dbAdjustments && dbAdjustments.length > 0) {
+              setAdjustments(dbAdjustments);
+            } else if (adjustments.length > 0) {
+              for (const adj of adjustments) {
+                await syncUpsert('stock_adjustments', adj);
+              }
+            }
 
-        if (dbDiscounts && dbDiscounts.length > 0) {
-          setDiscounts(dbDiscounts);
-        } else if (discounts.length > 0) {
-          for (const disc of discounts) {
-            await syncUpsert('discounts', disc);
-          }
-        }
+            if (dbTransfers && dbTransfers.length > 0) {
+              setTransfers(dbTransfers);
+            } else if (transfers.length > 0) {
+              for (const tr of transfers) {
+                await syncUpsert('stock_transfers', tr);
+              }
+            }
 
-        if (dbFlashMessages && dbFlashMessages.length > 0) {
-          setFlashMessages(dbFlashMessages);
-        } else if (flashMessages.length > 0) {
-          for (const fm of flashMessages) {
-            await syncUpsert('flash_messages', fm);
-          }
-        }
+            if (dbChatMessages && dbChatMessages.length > 0) {
+              setChatMessages(dbChatMessages);
+            } else if (chatMessages.length > 0) {
+              for (const msg of chatMessages) {
+                await syncUpsert('chat_messages', msg);
+              }
+            }
 
-        if (dbPayroll && dbPayroll.length > 0) {
-          setPayrollEntries(dbPayroll);
-        } else if (payrollEntries.length > 0) {
-          for (const pe of payrollEntries) {
-            await syncUpsert('payroll_entries', pe);
-          }
-        }
+            if (dbClientRequests && dbClientRequests.length > 0) {
+              setClientRequests(dbClientRequests);
+            } else if (clientRequests.length > 0) {
+              for (const req of clientRequests) {
+                await syncUpsert('client_requests', req);
+              }
+            }
 
-        showToast("Conexión en línea establecida. Base de datos sincronizada.", "success");
+            if (dbDiscounts && dbDiscounts.length > 0) {
+              setDiscounts(dbDiscounts);
+            } else if (discounts.length > 0) {
+              for (const disc of discounts) {
+                await syncUpsert('discounts', disc);
+              }
+            }
+
+            if (dbFlashMessages && dbFlashMessages.length > 0) {
+              setFlashMessages(dbFlashMessages);
+            } else if (flashMessages.length > 0) {
+              for (const fm of flashMessages) {
+                await syncUpsert('flash_messages', fm);
+              }
+            }
+
+            if (dbPayroll && dbPayroll.length > 0) {
+              setPayrollEntries(dbPayroll);
+            } else if (payrollEntries.length > 0) {
+              for (const pe of payrollEntries) {
+                await syncUpsert('payroll_entries', pe);
+              }
+            }
+
+            showToast("Base de datos sincronizada completamente.", "success");
+          } catch (e) {
+            console.error("Error cargando datos secundarios en segundo plano:", e);
+          }
+        };
+
+        loadSecondaryData();
+
       } catch (err) {
         console.error("Error al cargar la base de datos de Supabase:", err);
         showToast("Error de conexión con base de datos. Modo offline activo.", "error");
-      } finally {
         setIsLoadingDB(false);
       }
     };

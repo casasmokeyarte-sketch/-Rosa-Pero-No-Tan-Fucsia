@@ -83,7 +83,27 @@ export async function syncDeleteByField(table: string, fieldName: string, fieldV
 
 export async function fetchTable(table: string): Promise<any[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from(table).select('*');
+  
+  let query = supabase.from(table).select('*');
+  
+  // Optimización de rendimiento para tablas de historial / logs masivos
+  if (table === 'chat_messages') {
+    query = query.order('timestamp', { ascending: false }).limit(50);
+  } else if (table === 'invoices') {
+    query = query.order('created_at', { ascending: false }).limit(100);
+  } else if (table === 'stock_adjustments') {
+    query = query.order('created_at', { ascending: false }).limit(50);
+  } else if (table === 'expenses') {
+    query = query.order('created_at', { ascending: false }).limit(50);
+  } else if (table === 'shifts') {
+    query = query.order('start_time', { ascending: false }).limit(30);
+  } else if (table === 'payroll_entries') {
+    query = query.order('created_at', { ascending: false }).limit(30);
+  } else if (table === 'stock_transfers') {
+    query = query.order('created_at', { ascending: false }).limit(30);
+  }
+
+  const { data, error } = await query;
   if (error) {
     console.error(`Error fetching table ${table}:`, error);
     return [];
