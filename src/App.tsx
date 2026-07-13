@@ -902,6 +902,106 @@ export default function App() {
     loadAllData();
   }, []);
 
+  // Real-time synchronization (polling) for Supabase databases (chat, requests, invoices, products, shifts)
+  useEffect(() => {
+    if (!isSupabaseEnabled) return;
+
+    // Fast poll for chat messages and client requests (every 4 seconds)
+    const pollFastData = async () => {
+      try {
+        const dbChatMessages = await fetchTable('chat_messages');
+        if (dbChatMessages && dbChatMessages.length > 0) {
+          // Sort by ID to ensure stable JSON comparison
+          const sortedNew = [...dbChatMessages].sort((a, b) => a.id.localeCompare(b.id));
+          setChatMessages(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbChatMessages;
+            }
+            return prev;
+          });
+        }
+
+        const dbClientRequests = await fetchTable('client_requests');
+        if (dbClientRequests && dbClientRequests.length > 0) {
+          const sortedNew = [...dbClientRequests].sort((a, b) => a.id.localeCompare(b.id));
+          setClientRequests(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbClientRequests;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error("Error polling fast data:", err);
+      }
+    };
+
+    // Slow poll for other transactional tables (every 10 seconds)
+    const pollSlowData = async () => {
+      try {
+        const dbInvoices = await fetchTable('invoices');
+        if (dbInvoices && dbInvoices.length > 0) {
+          const sortedNew = [...dbInvoices].sort((a, b) => a.id.localeCompare(b.id));
+          setInvoices(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbInvoices;
+            }
+            return prev;
+          });
+        }
+
+        const dbProducts = await fetchTable('products');
+        if (dbProducts && dbProducts.length > 0) {
+          const sortedNew = [...dbProducts].sort((a, b) => a.id.localeCompare(b.id));
+          setProducts(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbProducts;
+            }
+            return prev;
+          });
+        }
+
+        const dbClients = await fetchTable('clients');
+        if (dbClients && dbClients.length > 0) {
+          const sortedNew = [...dbClients].sort((a, b) => a.id.localeCompare(b.id));
+          setClients(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbClients;
+            }
+            return prev;
+          });
+        }
+
+        const dbShifts = await fetchTable('shifts');
+        if (dbShifts && dbShifts.length > 0) {
+          const sortedNew = [...dbShifts].sort((a, b) => a.id.localeCompare(b.id));
+          setShifts(prev => {
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
+              return dbShifts;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error("Error polling slow data:", err);
+      }
+    };
+
+    const fastInterval = setInterval(pollFastData, 4000);
+    const slowInterval = setInterval(pollSlowData, 10000);
+
+    return () => {
+      clearInterval(fastInterval);
+      clearInterval(slowInterval);
+    };
+  }, [isSupabaseEnabled]);
+
   // Keep ticking live clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
