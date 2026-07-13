@@ -343,6 +343,12 @@ export default function App() {
   const [clientLoginRut, setClientLoginRut] = useState('');
   const [clientLoginPassword, setClientLoginPassword] = useState('');
   
+  // Force client password change states
+  const [newClientPassword, setNewClientPassword] = useState('');
+  const [confirmClientPassword, setConfirmClientPassword] = useState('');
+  const [forcePwdError, setForcePwdError] = useState<string | null>(null);
+  const [forcePwdSuccess, setForcePwdSuccess] = useState(false);
+  
   // Show/Hide password toggles
   const [showClientPassword, setShowClientPassword] = useState(false);
   const [showAgentPassword, setShowAgentPassword] = useState(false);
@@ -809,7 +815,32 @@ export default function App() {
         }
 
         if (dbClients && dbClients.length > 0) {
-          setClients(dbClients);
+          // Detectar y resolver códigos de clientes duplicados o vacíos de forma dinámica
+          const usedCodes = new Set<string>();
+          let hasDuplicates = false;
+          const cleanedClients = dbClients.map(client => {
+            let code = client.code;
+            if (!code || !code.startsWith('CL-') || usedCodes.has(code)) {
+              hasDuplicates = true;
+              let isUnique = false;
+              let newCode = '';
+              while (!isUnique) {
+                const randNum = Math.floor(1000 + Math.random() * 9000);
+                newCode = `CL-${randNum}`;
+                isUnique = !usedCodes.has(newCode) && !dbClients.some(c => c.code === newCode);
+              }
+              code = newCode;
+              // Guardar la corrección en la base de datos de Supabase en segundo plano
+              syncUpsert('clients', { ...client, code });
+            }
+            usedCodes.add(code);
+            return { ...client, code };
+          });
+
+          setClients(cleanedClients);
+          if (hasDuplicates) {
+            console.log("Se detectaron y corrigieron códigos de cliente duplicados.");
+          }
         } else {
           for (const c of clients) {
             await syncUpsert('clients', c);
@@ -1745,6 +1776,140 @@ export default function App() {
 
   // Render Client Portal if client logged in
   if (currentClient) {
+    if (currentClient.password === '1234' || !currentClient.password) {
+      const handleForcePasswordSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setForcePwdError(null);
+
+        if (!newClientPassword.trim()) {
+          setForcePwdError("La nueva contraseña no puede estar vacía.");
+          return;
+        }
+        if (newClientPassword.trim() === '1234') {
+          setForcePwdError("No puede utilizar la contraseña temporal por defecto.");
+          return;
+        }
+        if (newClientPassword !== confirmClientPassword) {
+          setForcePwdError("Las contraseñas no coinciden.");
+          return;
+        }
+
+        try {
+          const updatedClient = {
+            ...currentClient,
+            password: newClientPassword.trim()
+          };
+
+          // Sync to Supabase
+          if (isSupabaseEnabled) {
+            await syncUpsert('clients', updatedClient);
+          }
+
+          // Update local state
+          setClients(prev => prev.map(c => c.id === currentClient.id ? updatedClient : c));
+          
+          // Show success animation
+          setForcePwdSuccess(true);
+          
+          // Simulate sending email
+          console.log(`
+            ==================================================
+            ✉️ CORREO DE ACTIVACIÓN ENVIADO (SIMULADO)
+            Para: ${currentClient.email || 'contacto@courier.net'}
+            Asunto: Activación de Cuenta y Cambio de Contraseña - Rosa Pero No Tan Fucsia
+            Contenido: Estimado/a ${currentClient.name}, su cuenta con código ${currentClient.code} ha sido activada correctamente con su nueva contraseña de seguridad.
+            ==================================================
+          `);
+
+          setTimeout(() => {
+            setCurrentClient(updatedClient);
+            setNewClientPassword('');
+            setConfirmClientPassword('');
+            setForcePwdSuccess(false);
+            showToast("¡Cuenta activada con éxito! Correo de confirmación enviado.", "success");
+          }, 2500);
+
+        } catch (err) {
+          console.error("Error al actualizar la contraseña obligatoria:", err);
+          setForcePwdError("Error al guardar la nueva contraseña en el servidor. Intente de nuevo.");
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex flex-col items-center justify-center relative overflow-hidden scanlines p-4">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyber-pink/10 rounded-full blur-[120px] pointer-events-none"></div>
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyber-blue/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+          <div className="w-full max-w-md bg-slate-950/80 border border-cyber-border rounded-2xl p-8 shadow-2xl relative z-10 backdrop-blur-md">
+            {forcePwdSuccess ? (
+              <div className="text-center space-y-4 py-8 animate-pulse">
+                <div className="w-16 h-16 bg-cyber-green/20 border-2 border-cyber-green rounded-full flex items-center justify-center mx-auto text-cyber-green text-3xl">✓</div>
+                <h2 className="text-xl font-bold font-mono tracking-widest text-cyber-green uppercase">¡CUENTA ACTIVADA!</h2>
+                <p className="text-xs text-gray-400 font-mono">Guardando credenciales seguras y enviando correo de confirmación a {currentClient.email || 'correo registrado'}...</p>
+              </div>
+            ) : (
+              <form onSubmit={handleForcePasswordSubmit} className="space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="inline-block px-3 py-1 bg-cyber-pink/20 border border-cyber-pink text-cyber-pink rounded-full text-[10px] font-mono tracking-wider uppercase">
+                    Seguridad Obligatoria
+                  </div>
+                  <h2 className="text-xl font-extrabold font-mono text-white tracking-wide uppercase">Activar Cuenta</h2>
+                  <p className="text-[11px] font-mono text-gray-400">
+                    Estás ingresando con la contraseña temporal. Define una contraseña definitiva para tu portal de cliente.
+                  </p>
+                </div>
+
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 text-[11px] font-mono">
+                  <div><span className="text-cyber-pink">Cliente:</span> {currentClient.name}</div>
+                  <div><span className="text-cyber-pink">Código:</span> {currentClient.code}</div>
+                  <div><span className="text-cyber-pink">Email:</span> {currentClient.email || 'No registrado'}</div>
+                </div>
+
+                {forcePwdError && (
+                  <div className="bg-red-950/40 border border-red-500/50 p-3 rounded-lg text-red-200 text-xs font-mono text-center">
+                    ⚠️ {forcePwdError}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-gray-400 text-[10px] uppercase font-mono tracking-wider">Nueva Contraseña</label>
+                    <input 
+                      type="password"
+                      value={newClientPassword}
+                      onChange={e => setNewClientPassword(e.target.value)}
+                      placeholder="Defina su nueva contraseña"
+                      className="w-full bg-cyber-bg border border-cyber-border focus:border-cyber-pink focus:outline-none p-2.5 rounded-lg text-white font-mono text-xs"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-400 text-[10px] uppercase font-mono tracking-wider">Confirmar Nueva Contraseña</label>
+                    <input 
+                      type="password"
+                      value={confirmClientPassword}
+                      onChange={e => setConfirmClientPassword(e.target.value)}
+                      placeholder="Repita su nueva contraseña"
+                      className="w-full bg-cyber-bg border border-cyber-border focus:border-cyber-pink focus:outline-none p-2.5 rounded-lg text-white font-mono text-xs"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-cyber-pink to-cyber-orange hover:opacity-90 active:scale-[0.98] transition-all py-3 rounded-lg text-white font-bold font-mono tracking-widest text-xs uppercase cursor-pointer"
+                >
+                  Activar Cuenta y Enviar Correo
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <PortalCliente 
         client={currentClient}
