@@ -229,6 +229,14 @@ export default function ChatSoporte({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
+    
+    // Validar límite de tamaño (1MB) para proteger el rendimiento de la base de datos
+    if (file.size > 1024 * 1024) {
+      showToast("Archivo demasiado pesado (máximo 1MB). Por favor, comprímelo o sube un archivo más pequeño.", "error");
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onloadend = () => {

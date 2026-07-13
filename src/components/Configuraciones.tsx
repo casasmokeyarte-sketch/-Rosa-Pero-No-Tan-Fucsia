@@ -283,6 +283,13 @@ export default function Configuraciones({
     const file = e.target.files?.[0];
     if (!file) return;
     
+    // Validar límite de tamaño (1MB) para proteger el rendimiento de la base de datos
+    if (file.size > 1024 * 1024) {
+      window.alert("Archivo demasiado pesado (máximo 1MB). Por favor, sube un archivo más pequeño.");
+      if (flashFileInputRef.current) flashFileInputRef.current.value = '';
+      return;
+    }
+
     let type: 'image' | 'video' | 'file' = 'file';
     if (file.type.startsWith('image/')) type = 'image';
     else if (file.type.startsWith('video/')) type = 'video';
