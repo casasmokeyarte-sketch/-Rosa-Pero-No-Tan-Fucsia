@@ -133,6 +133,14 @@ export function getUserPermissions(user: User): UserPermissions {
   };
 }
 
+function safeSetItem(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn(`Failed to save ${key} to localStorage:`, e);
+  }
+}
+
 export default function App() {
   
   const [isLoadingDB, setIsLoadingDB] = useState<boolean>(isSupabaseEnabled);
@@ -359,11 +367,28 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('extreme_chat_messages', JSON.stringify(chatMessages));
+    try {
+      const optimizedMessages = chatMessages.map(msg => {
+        if (msg.attachment?.url && msg.attachment.url.startsWith('data:') && msg.attachment.url.length > 50 * 1024) {
+          return {
+            ...msg,
+            attachment: {
+              ...msg.attachment,
+              url: '' // Strip large base64 string
+            }
+          };
+        }
+        return msg;
+      });
+      const slicedMessages = optimizedMessages.slice(-150);
+      safeSetItem('extreme_chat_messages', JSON.stringify(slicedMessages));
+    } catch (e) {
+      console.warn("Failed to optimize and save chat messages:", e);
+    }
   }, [chatMessages]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_client_requests', JSON.stringify(clientRequests));
+    safeSetItem('extreme_client_requests', JSON.stringify(clientRequests));
   }, [clientRequests]);
 
   const handleAddClientRequest = (req: ClientRequest) => {
@@ -376,11 +401,11 @@ export default function App() {
     if (isSupabaseEnabled) syncUpsert('client_requests', updated);
   };
 
-  useEffect(() => { localStorage.setItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
+  useEffect(() => { safeSetItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
 
-  useEffect(() => { localStorage.setItem('extreme_flash_messages', JSON.stringify(flashMessages)); }, [flashMessages]);
+  useEffect(() => { safeSetItem('extreme_flash_messages', JSON.stringify(flashMessages)); }, [flashMessages]);
 
-  useEffect(() => { localStorage.setItem('extreme_flash_views', JSON.stringify(flashViews)); }, [flashViews]);
+  useEffect(() => { safeSetItem('extreme_flash_views', JSON.stringify(flashViews)); }, [flashViews]);
 
   const incrementFlashView = (flashId: string, viewerId: string) => {
     setFlashViews(prev => ({
@@ -389,9 +414,9 @@ export default function App() {
     }));
   };
 
-  useEffect(() => { localStorage.setItem('extreme_sound_settings', JSON.stringify(soundSettings)); }, [soundSettings]);
+  useEffect(() => { safeSetItem('extreme_sound_settings', JSON.stringify(soundSettings)); }, [soundSettings]);
 
-  useEffect(() => { localStorage.setItem('extreme_payroll', JSON.stringify(payrollEntries)); }, [payrollEntries]);
+  useEffect(() => { safeSetItem('extreme_payroll', JSON.stringify(payrollEntries)); }, [payrollEntries]);
 
   // Listen for new online orders and play sound / show notification toast for the operator
   useEffect(() => {
@@ -526,12 +551,12 @@ export default function App() {
 
   // Sync authentication state to LocalStorage
   useEffect(() => {
-    localStorage.setItem('extreme_is_authenticated', String(isAuthenticated));
+    safeSetItem('extreme_is_authenticated', String(isAuthenticated));
   }, [isAuthenticated]);
 
   useEffect(() => {
     if (currentClient) {
-      localStorage.setItem('extreme_current_client', JSON.stringify(currentClient));
+      safeSetItem('extreme_current_client', JSON.stringify(currentClient));
     } else {
       localStorage.removeItem('extreme_current_client');
     }
@@ -539,7 +564,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem('extreme_current_user', JSON.stringify(currentUser));
+      safeSetItem('extreme_current_user', JSON.stringify(currentUser));
     } else {
       localStorage.removeItem('extreme_current_user');
     }
@@ -1045,39 +1070,45 @@ export default function App() {
 
   // Sync to LocalStorage whenever state changes
   useEffect(() => {
-    localStorage.setItem('extreme_config', JSON.stringify(config));
+    safeSetItem('extreme_config', JSON.stringify(config));
   }, [config]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_users', JSON.stringify(users));
+    safeSetItem('extreme_users', JSON.stringify(users));
   }, [users]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_products', JSON.stringify(products));
+    safeSetItem('extreme_products', JSON.stringify(products));
   }, [products]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_clients', JSON.stringify(clients));
+    safeSetItem('extreme_clients', JSON.stringify(clients));
   }, [clients]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_invoices', JSON.stringify(invoices));
+    // Limit local invoices storage to prevent exceeding browser quota
+    try {
+      const slicedInvoices = invoices.slice(-150);
+      safeSetItem('extreme_invoices', JSON.stringify(slicedInvoices));
+    } catch (e) {
+      console.warn("Failed to slice and save invoices:", e);
+    }
   }, [invoices]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_expenses', JSON.stringify(expenses));
+    safeSetItem('extreme_expenses', JSON.stringify(expenses));
   }, [expenses]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_shifts', JSON.stringify(shifts));
+    safeSetItem('extreme_shifts', JSON.stringify(shifts));
   }, [shifts]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_adjustments', JSON.stringify(adjustments));
+    safeSetItem('extreme_adjustments', JSON.stringify(adjustments));
   }, [adjustments]);
 
   useEffect(() => {
-    localStorage.setItem('extreme_transfers', JSON.stringify(transfers));
+    safeSetItem('extreme_transfers', JSON.stringify(transfers));
   }, [transfers]);
 
   // Business operations

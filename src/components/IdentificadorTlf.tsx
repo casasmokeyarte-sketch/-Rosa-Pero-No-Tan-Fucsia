@@ -32,7 +32,11 @@ export default function IdentificadorTlf({ clients, onAddClient, showToast }: Id
   });
 
   useEffect(() => {
-    localStorage.setItem('extreme_phone_records', JSON.stringify(phoneDb));
+    try {
+      localStorage.setItem('extreme_phone_records', JSON.stringify(phoneDb));
+    } catch (e) {
+      console.warn("Failed to save extreme_phone_records to localStorage:", e);
+    }
   }, [phoneDb]);
 
   const [searchQuery, setSearchQuery] = useState('');

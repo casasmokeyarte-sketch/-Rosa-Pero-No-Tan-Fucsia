@@ -479,7 +479,11 @@ export default function AtomBubble({
                     if (val && !manuallyAddedClientIds.includes(val)) {
                       const newManual = [...manuallyAddedClientIds, val];
                       setManuallyAddedClientIds(newManual);
-                      localStorage.setItem('extreme_manually_added_chats', JSON.stringify(newManual));
+                      try {
+                        localStorage.setItem('extreme_manually_added_chats', JSON.stringify(newManual));
+                      } catch (e) {
+                        console.warn("Failed to save extreme_manually_added_chats to localStorage:", e);
+                      }
                       setActiveChatClientId(val);
                       showToast("Cliente vinculado en burbuja rápida", "success");
                       e.target.value = "";

@@ -344,7 +344,11 @@ export default function PortalCliente({
         client: client,
         paymentOption: paymentOption
       };
-      localStorage.setItem('pending_bold_order', JSON.stringify(pendingOrder));
+      try {
+        localStorage.setItem('pending_bold_order', JSON.stringify(pendingOrder));
+      } catch (e) {
+        console.warn("Failed to save pending_bold_order to localStorage:", e);
+      }
     }
   }, [checkoutStep, currentOrderNum, cart, deliveryMethod, deliveryAddress, deliveryTransport, paymentOption]);
 

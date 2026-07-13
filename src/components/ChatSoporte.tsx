@@ -72,7 +72,11 @@ export default function ChatSoporte({
   });
 
   useEffect(() => {
-    localStorage.setItem('extreme_manually_added_chats', JSON.stringify(manuallyAddedClientIds));
+    try {
+      localStorage.setItem('extreme_manually_added_chats', JSON.stringify(manuallyAddedClientIds));
+    } catch (e) {
+      console.warn("Failed to save extreme_manually_added_chats to localStorage:", e);
+    }
   }, [manuallyAddedClientIds]);
 
   // Voice Recording timer effect
