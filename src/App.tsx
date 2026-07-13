@@ -972,6 +972,116 @@ export default function App() {
     loadAllData();
   }, []);
 
+  // Handle Bold payment redirect callback at root level (on mount)
+  useEffect(() => {
+    if (!isSupabaseEnabled) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const boldTxStatus = params.get('bold-tx-status');
+    const boldStatus = params.get('bold_status');
+    const boldOrderId = params.get('bold-order-id');
+
+    const isApproved = boldStatus === 'success' || 
+                       boldTxStatus === 'approved' || 
+                       boldTxStatus === 'success';
+
+    if (isApproved) {
+      const pendingStr = localStorage.getItem('pending_bold_order');
+      if (pendingStr) {
+        try {
+          const pending = JSON.parse(pendingStr);
+          if (pending && pending.client && pending.cart && pending.cart.length > 0) {
+            const clientObj = pending.client;
+            
+            const invoiceItems = pending.cart.map((item: any) => ({
+              productId: item.product.id,
+              productName: item.product.name,
+              price: item.product.price,
+              quantity: item.quantity,
+              taxAmount: 0,
+              total: item.product.price * item.quantity
+            }));
+            
+            const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
+            const tax = 0;
+            const cost = pending.deliveryMethod === 'oficina' ? 15000.00 : 0.00;
+            const fee = config.cardFeeEnabled ? parseFloat(((subtotal + cost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2)) : 0;
+            const total = subtotal + tax + cost + fee;
+
+            const invoiceId = `inv-client-${Date.now()}`;
+            const orderNum = pending.orderNum || `WEB-${Math.floor(1000 + Math.random() * 9000)}`;
+
+            const newInvoice: Invoice = {
+              id: invoiceId,
+              invoiceNumber: orderNum,
+              clientId: clientObj.id,
+              clientName: clientObj.name,
+              clientRut: clientObj.rut,
+              items: invoiceItems,
+              subtotal: subtotal,
+              discount: 0,
+              taxRate: 0,
+              taxAmount: 0,
+              total: total,
+              paymentMethod: 'Bold',
+              paymentStatus: 'Pagado',
+              dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              createdAt: new Date().toISOString(),
+              cashierName: 'Portal Online',
+              isDelivery: pending.deliveryMethod !== 'recoge',
+              deliveryFee: cost,
+              deliveryRider: pending.deliveryMethod === 'recoge' ? 'N/A' : (pending.deliveryMethod === 'cliente' ? 'Asignado por Cliente' : 'Por Asignar'),
+              deliveryTransport: pending.deliveryMethod === 'recoge' ? 'N/A' : pending.deliveryTransport,
+              deliveryStatus: 'Pendiente',
+              deliveryMethod: pending.deliveryMethod,
+              guideAddress: pending.deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : pending.deliveryAddress,
+              cardFee: fee > 0 ? fee : undefined
+            };
+
+            // 1. Evitar duplicar factura si ya se procesó
+            setInvoices(prev => {
+              if (prev.some(inv => inv.invoiceNumber === orderNum)) return prev;
+              return [newInvoice, ...prev];
+            });
+
+            // 2. Sincronizar en Supabase
+            syncUpsert('invoices', newInvoice);
+
+            // 3. Loguear automáticamente al cliente para restaurar su sesión
+            setCurrentClient(clientObj);
+
+            // 4. Agregar mensaje de chat de soporte automático
+            setTimeout(() => {
+              const chatMsgId = `msg-${Date.now()}`;
+              const chatMsg = {
+                id: chatMsgId,
+                clientId: clientObj.id,
+                sender: 'agent',
+                senderName: 'Asistente Digital',
+                text: `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${total.toLocaleString('es-CO')} COP. Modalidad: ${
+                  pending.deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
+                }. Pago: Bold (Aprobado). Un despachador de Rosa Fuerte está preparando la carga.`,
+                timestamp: new Date().toISOString()
+              };
+              setChatMessages(prev => [...prev, chatMsg]);
+              syncUpsert('chat_messages', chatMsg);
+            }, 1500);
+
+            // 5. Limpieza de LocalStorage y URL
+            localStorage.removeItem('pending_bold_order');
+            
+            showToast(`¡Pago Bold Exitoso! Pedido #${orderNum} procesado.`, "success");
+
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+          }
+        } catch (e) {
+          console.error("Error processing pending Bold redirect in App.tsx:", e);
+        }
+      }
+    }
+  }, [isSupabaseEnabled, config]);
+
   // Real-time synchronization (polling) for Supabase databases (chat, requests, invoices, products, shifts)
   useEffect(() => {
     if (!isSupabaseEnabled) return;

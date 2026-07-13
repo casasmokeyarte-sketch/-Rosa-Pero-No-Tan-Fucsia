@@ -435,27 +435,6 @@ export default function PortalCliente({
 
             onAddInvoice(newInvoice);
 
-            const newRequest: ClientRequest = {
-              id: `req-online-${Date.now()}`,
-              clientId: client.id,
-              clientName: client.name,
-              clientRut: client.rut,
-              type: 'Solicitud',
-              subject: `Nuevo Pedido Online #${pending.orderNum}`,
-              description: `Pedido de Compra y Despacho Online #${pending.orderNum} realizado por ${client.name}.
-Insumos: ${invoiceItems.map((it: any) => `${it.productName} (Cant: ${it.quantity})`).join(', ')}.
-Método de Pago: Pago Online BOLD (Aprobado / Pagado).
-Modalidad de Entrega: ${
-                pending.deliveryMethod === 'oficina' ? 'Despacho por la Oficina' :
-                pending.deliveryMethod === 'cliente' ? 'Domicilio por su cuenta (Cliente)' :
-                'Retiro en persona'
-              }.
-Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)' : pending.deliveryAddress}.`,
-              status: 'Pendiente',
-              priority: 'Alta',
-              createdAt: new Date().toISOString()
-            };
-            onSubmitRequest(newRequest);
 
             setCart([]);
             setCheckoutStep('cart');
@@ -558,29 +537,6 @@ Dirección de Entrega: ${pending.deliveryMethod === 'recoge' ? 'N/A (Retiro en o
     };
 
     onAddInvoice(newInvoice);
-
-    // Create client request notification for portal bunker
-    const newRequest: ClientRequest = {
-      id: `req-online-${Date.now()}`,
-      clientId: client.id,
-      clientName: client.name,
-      clientRut: client.rut,
-      type: 'Solicitud',
-      subject: `Nuevo Pedido Online #${orderNum}`,
-      description: `Pedido de Compra y Despacho Online #${orderNum} realizado por ${client.name}.
-Insumos: ${invoiceItems.map(it => `${it.productName} (Cant: ${it.quantity})`).join(', ')}.
-Método de Pago: ${method === 'Bold' ? 'Pago Online BOLD (Aprobado / Pagado)' : 'Línea de Crédito (Pendiente Cobro)'}.
-Modalidad de Entrega: ${
-        deliveryMethod === 'oficina' ? 'Despacho por la Oficina' :
-        deliveryMethod === 'cliente' ? 'Domicilio por su cuenta (Cliente)' :
-        'Retiro en persona'
-      }.
-Dirección de Entrega: ${deliveryMethod === 'recoge' ? 'N/A (Retiro en oficina)' : deliveryAddress}.`,
-      status: 'Pendiente',
-      priority: 'Alta',
-      createdAt: new Date().toISOString()
-    };
-    onSubmitRequest(newRequest);
 
     setCart([]);
     setCheckoutStep('cart');

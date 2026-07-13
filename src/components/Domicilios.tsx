@@ -27,8 +27,8 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
   const [statusFilter, setStatusFilter] = useState<'Todos' | 'Pendiente' | 'En Camino' | 'Entregado' | 'Cancelado'>('Todos');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
-  // Get all delivery-related invoices, including online client portal requests
-  const deliveryInvoices = invoices.filter(inv => inv.isDelivery || inv.cashierName === 'Portal Online');
+  // Get all delivery-related invoices
+  const deliveryInvoices = invoices.filter(inv => inv.isDelivery);
 
   // Statistics calculations
   const totalDeliveriesCount = deliveryInvoices.length;
