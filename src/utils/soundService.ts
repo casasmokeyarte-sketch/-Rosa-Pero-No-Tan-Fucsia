@@ -50,8 +50,10 @@ const TONES: Record<ToneName, (ctx: AudioContext) => void> = {
   Ping:           (c) => beep(c, 1760, 0.06, 0.55)
 };
 
+export let hasInteracted = false;
+
 export function playTone(tone: ToneName = 'Predeterminado') {
-  if (tone === 'Silencio') return;
+  if (tone === 'Silencio' || !hasInteracted) return;
   try {
     const ctx = getCtx();
     const run = () => TONES[tone]?.(ctx);
@@ -63,6 +65,7 @@ export function playTone(tone: ToneName = 'Predeterminado') {
 // Auto-resumen del AudioContext con la primera interacción del usuario en la página
 if (typeof window !== 'undefined') {
   const initAudioOnGesture = () => {
+    hasInteracted = true;
     try {
       if (!_ctx) {
         _ctx = new AudioContext();

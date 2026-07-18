@@ -148,4 +148,11 @@ ADD COLUMN IF NOT EXISTS passkey_credential jsonb;
 UPDATE clients 
 SET code = 'CL-' || floor(random() * 9000 + 1000)::text 
 WHERE code IS NULL;
+
+-- 9. Columnas faltantes en la tabla 'clients' para soportar créditos, descuentos especiales y perfil de empleado
+ALTER TABLE clients 
+ADD COLUMN IF NOT EXISTS has_credit boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS is_employee boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS special_discount_percentage numeric(5,2) DEFAULT 0,
+ADD COLUMN IF NOT EXISTS discounted_product_ids jsonb DEFAULT '[]';
     
