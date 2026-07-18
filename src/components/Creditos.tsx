@@ -133,7 +133,7 @@ export default function Creditos({
   const filteredProducts = useMemo(() => {
     return products.filter(p => 
       p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(productSearch.toLowerCase())
+      p.code.toLowerCase().includes(productSearch.toLowerCase())
     );
   }, [products, productSearch]);
 

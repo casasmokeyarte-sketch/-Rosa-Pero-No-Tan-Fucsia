@@ -88,7 +88,7 @@ export async function fetchTable(table: string): Promise<any[]> {
   
   // Optimización de rendimiento para tablas de historial / logs masivos
   if (table === 'chat_messages') {
-    query = query.order('created_at', { ascending: false }).limit(50);
+    query = query.order('timestamp', { ascending: false }).limit(50);
   } else if (table === 'invoices') {
     query = query.order('created_at', { ascending: false }).limit(100);
   } else if (table === 'stock_adjustments') {

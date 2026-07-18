@@ -59,3 +59,25 @@ export function playTone(tone: ToneName = 'Predeterminado') {
     else run();
   } catch { /* silently ignore */ }
 }
+
+// Auto-resumen del AudioContext con la primera interacción del usuario en la página
+if (typeof window !== 'undefined') {
+  const initAudioOnGesture = () => {
+    try {
+      if (!_ctx) {
+        _ctx = new AudioContext();
+      }
+      if (_ctx && _ctx.state === 'suspended') {
+        _ctx.resume();
+      }
+    } catch (e) {
+      console.warn("Could not auto-resume audio context:", e);
+    }
+    window.removeEventListener('click', initAudioOnGesture);
+    window.removeEventListener('keydown', initAudioOnGesture);
+    window.removeEventListener('touchstart', initAudioOnGesture);
+  };
+  window.addEventListener('click', initAudioOnGesture);
+  window.addEventListener('keydown', initAudioOnGesture);
+  window.addEventListener('touchstart', initAudioOnGesture);
+}

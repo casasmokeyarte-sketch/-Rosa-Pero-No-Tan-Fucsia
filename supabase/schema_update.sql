@@ -130,6 +130,9 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_origin ON stock_transfers(origin);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_destination ON stock_transfers(destination);
 
+-- Desactivar RLS para que la aplicación frontend (con clave anon) pueda leer/escribir traspasos sin error 401
+ALTER TABLE stock_transfers DISABLE ROW LEVEL SECURITY;
+
 
 -- ============================================================
 -- 8. Columna 'code' en la tabla 'clients' para Código de Acceso Único y Credenciales Biométricas

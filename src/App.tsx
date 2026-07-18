@@ -227,6 +227,9 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const mountTimeRef = useRef(new Date());
+  const initialDataLoadedRef = useRef(false);
+  const knownInvoiceIdsRef = useRef<Set<string>>(new Set());
+  const knownChatIdsRef = useRef<Set<string>>(new Set());
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
 
   // Biometric authentication states
@@ -429,31 +432,39 @@ export default function App() {
 
   // Listen for new online orders and play sound / show notification toast for the operator
   useEffect(() => {
-    const newOnlineInvoices = invoices.filter(inv => 
-      inv.cashierName === 'Portal Online' && 
-      new Date(inv.createdAt) > mountTimeRef.current
-    );
-    if (newOnlineInvoices.length > 0) {
+    if (!initialDataLoadedRef.current || invoices.length === 0) return;
+
+    let newOnlineInvoiceToNotify: Invoice | null = null;
+
+    invoices.forEach(inv => {
+      if (inv.cashierName === 'Portal Online' && !knownInvoiceIdsRef.current.has(inv.id)) {
+        knownInvoiceIdsRef.current.add(inv.id);
+        newOnlineInvoiceToNotify = inv;
+      } else if (!knownInvoiceIdsRef.current.has(inv.id)) {
+        knownInvoiceIdsRef.current.add(inv.id);
+      }
+    });
+
+    if (newOnlineInvoiceToNotify) {
+      const inv: Invoice = newOnlineInvoiceToNotify;
       if (soundSettings.soundEnabled && soundSettings.notifSoundEnabled) {
         playTone(soundSettings.defaultTone as any);
       } else {
         playTone('Predeterminado');
       }
-      showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toLocaleString('es-CO')} COP.`, "warning");
+      showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${inv.invoiceNumber} por $${inv.total.toLocaleString('es-CO')} COP.`, "warning");
       
       // Native system push notification
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
           new Notification('Rosa Fuerte - Pedido Online', {
-            body: `🚨 ¡Nueva orden! Pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toLocaleString('es-CO')} COP.`,
+            body: `🚨 ¡Nueva orden! Pedido ${inv.invoiceNumber} por $${inv.total.toLocaleString('es-CO')} COP.`,
             icon: '/images/logo_cyberpunk_1783131526095.jpg'
           });
         } catch (err) {
           console.error("Failed to display native notification:", err);
         }
       }
-      
-      mountTimeRef.current = new Date();
     }
   }, [invoices, soundSettings]);
 
@@ -478,44 +489,51 @@ export default function App() {
 
   // Play sounds for chat messages
   useEffect(() => {
-    if (chatMessages.length === 0) return;
-    const lastMsg = chatMessages[chatMessages.length - 1];
-    
-    // Check if the message is fresh (sent in the last 4 seconds)
-    const msgTime = new Date(lastMsg.timestamp).getTime();
-    if (Date.now() - msgTime > 4000) return;
+    if (!initialDataLoadedRef.current || chatMessages.length === 0) return;
 
-    if (lastMsg.sender === 'client') {
-      // Incoming message for operators
-      if (soundSettings.soundEnabled && soundSettings.chatSoundEnabled) {
-        playTone(soundSettings.defaultTone as any);
+    let newMsgToNotify: ChatMessage | null = null;
+
+    chatMessages.forEach(msg => {
+      if (!knownChatIdsRef.current.has(msg.id)) {
+        knownChatIdsRef.current.add(msg.id);
+        newMsgToNotify = msg;
       }
-      
-      // Native system push notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(`Rosa Fuerte - Chat de ${lastMsg.senderName || 'Cliente'}`, {
-            body: lastMsg.text,
-            icon: '/images/logo_cyberpunk_1783131526095.jpg'
-          });
-        } catch (err) {
-          console.error("Failed to display native chat notification:", err);
+    });
+
+    if (newMsgToNotify) {
+      const msg: ChatMessage = newMsgToNotify;
+      if (msg.sender === 'client' && !currentClient) {
+        // Incoming message for operators
+        if (soundSettings.soundEnabled && soundSettings.chatSoundEnabled) {
+          playTone(soundSettings.defaultTone as any);
         }
-      }
-    } else if (lastMsg.sender === 'agent' && currentClient) {
-      // Incoming message for client
-      const tone = currentClient.chatSoundTone || 'Predeterminado';
-      playTone(tone as any);
-      
-      // Native system push notification for client
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(`Rosa Fuerte - Soporte`, {
-            body: lastMsg.text,
-            icon: '/images/logo_cyberpunk_1783131526095.jpg'
-          });
-        } catch (err) {
-          console.error("Failed to display native client chat notification:", err);
+        
+        // Native system push notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`Rosa Fuerte - Chat de ${msg.senderName || 'Cliente'}`, {
+              body: msg.text,
+              icon: '/images/logo_cyberpunk_1783131526095.jpg'
+            });
+          } catch (err) {
+            console.error("Failed to display native chat notification:", err);
+          }
+        }
+      } else if (msg.sender === 'agent' && currentClient) {
+        // Incoming message for client
+        const tone = currentClient.chatSoundTone || 'Predeterminado';
+        playTone(tone as any);
+        
+        // Native system push notification for client
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`Rosa Fuerte - Soporte`, {
+              body: msg.text,
+              icon: '/images/logo_cyberpunk_1783131526095.jpg'
+            });
+          } catch (err) {
+            console.error("Failed to display native client chat notification:", err);
+          }
         }
       }
     }
@@ -893,28 +911,29 @@ export default function App() {
 
         // 2. Fetch remaining data in the background
         const loadSecondaryData = async () => {
+          // Inicializar sets de control con los datos locales preexistentes
+          invoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
+          chatMessages.forEach(msg => knownChatIdsRef.current.add(msg.id));
+
+          // Products
           try {
             const dbProducts = await fetchTable('products');
-            const dbInvoices = await fetchTable('invoices');
-            const dbExpenses = await fetchTable('expenses');
-            const dbShifts = await fetchTable('shifts');
-            const dbAdjustments = await fetchTable('stock_adjustments');
-            const dbTransfers = await fetchTable('stock_transfers');
-            const dbChatMessages = await fetchTable('chat_messages');
-            const dbClientRequests = await fetchTable('client_requests');
-            const dbDiscounts = await fetchTable('discounts');
-            const dbFlashMessages = await fetchTable('flash_messages');
-            const dbPayroll = await fetchTable('payroll_entries');
-
             if (dbProducts && dbProducts.length > 0) {
               setProducts(dbProducts);
-            } else {
+            } else if (products.length > 0) {
               for (const p of products) {
                 await syncUpsert('products', p);
               }
             }
+          } catch (e) {
+            console.error("Error cargando products en segundo plano:", e);
+          }
 
+          // Invoices
+          try {
+            const dbInvoices = await fetchTable('invoices');
             if (dbInvoices && dbInvoices.length > 0) {
+              dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
               setInvoices(prev => {
                 const merged = [...prev];
                 dbInvoices.forEach(dbInv => {
@@ -930,7 +949,13 @@ export default function App() {
                 await syncUpsert('invoices', inv);
               }
             }
+          } catch (e) {
+            console.error("Error cargando invoices en segundo plano:", e);
+          }
 
+          // Expenses
+          try {
+            const dbExpenses = await fetchTable('expenses');
             if (dbExpenses && dbExpenses.length > 0) {
               setExpenses(dbExpenses);
             } else if (expenses.length > 0) {
@@ -938,7 +963,13 @@ export default function App() {
                 await syncUpsert('expenses', exp);
               }
             }
+          } catch (e) {
+            console.error("Error cargando expenses en segundo plano:", e);
+          }
 
+          // Shifts
+          try {
+            const dbShifts = await fetchTable('shifts');
             if (dbShifts && dbShifts.length > 0) {
               setShifts(dbShifts);
             } else if (shifts.length > 0) {
@@ -946,7 +977,13 @@ export default function App() {
                 await syncUpsert('shifts', sh);
               }
             }
+          } catch (e) {
+            console.error("Error cargando shifts en segundo plano:", e);
+          }
 
+          // Adjustments
+          try {
+            const dbAdjustments = await fetchTable('stock_adjustments');
             if (dbAdjustments && dbAdjustments.length > 0) {
               setAdjustments(dbAdjustments);
             } else if (adjustments.length > 0) {
@@ -954,7 +991,13 @@ export default function App() {
                 await syncUpsert('stock_adjustments', adj);
               }
             }
+          } catch (e) {
+            console.error("Error cargando stock_adjustments en segundo plano:", e);
+          }
 
+          // Transfers
+          try {
+            const dbTransfers = await fetchTable('stock_transfers');
             if (dbTransfers && dbTransfers.length > 0) {
               setTransfers(dbTransfers);
             } else if (transfers.length > 0) {
@@ -962,8 +1005,15 @@ export default function App() {
                 await syncUpsert('stock_transfers', tr);
               }
             }
+          } catch (e) {
+            console.error("Error cargando stock_transfers en segundo plano:", e);
+          }
 
+          // Chat Messages
+          try {
+            const dbChatMessages = await fetchTable('chat_messages');
             if (dbChatMessages && dbChatMessages.length > 0) {
+              dbChatMessages.forEach(msg => knownChatIdsRef.current.add(msg.id));
               setChatMessages(prev => {
                 const merged = [...prev];
                 dbChatMessages.forEach(dbMsg => {
@@ -979,7 +1029,13 @@ export default function App() {
                 await syncUpsert('chat_messages', msg);
               }
             }
+          } catch (e) {
+            console.error("Error cargando chat_messages en segundo plano:", e);
+          }
 
+          // Client Requests
+          try {
+            const dbClientRequests = await fetchTable('client_requests');
             if (dbClientRequests && dbClientRequests.length > 0) {
               setClientRequests(dbClientRequests);
             } else if (clientRequests.length > 0) {
@@ -987,7 +1043,13 @@ export default function App() {
                 await syncUpsert('client_requests', req);
               }
             }
+          } catch (e) {
+            console.error("Error cargando client_requests en segundo plano:", e);
+          }
 
+          // Discounts
+          try {
+            const dbDiscounts = await fetchTable('discounts');
             if (dbDiscounts && dbDiscounts.length > 0) {
               setDiscounts(dbDiscounts);
             } else if (discounts.length > 0) {
@@ -995,7 +1057,13 @@ export default function App() {
                 await syncUpsert('discounts', disc);
               }
             }
+          } catch (e) {
+            console.error("Error cargando discounts en segundo plano:", e);
+          }
 
+          // Flash Messages
+          try {
+            const dbFlashMessages = await fetchTable('flash_messages');
             if (dbFlashMessages && dbFlashMessages.length > 0) {
               setFlashMessages(dbFlashMessages);
             } else if (flashMessages.length > 0) {
@@ -1003,7 +1071,13 @@ export default function App() {
                 await syncUpsert('flash_messages', fm);
               }
             }
+          } catch (e) {
+            console.error("Error cargando flash_messages en segundo plano:", e);
+          }
 
+          // Payroll
+          try {
+            const dbPayroll = await fetchTable('payroll_entries');
             if (dbPayroll && dbPayroll.length > 0) {
               setPayrollEntries(dbPayroll);
             } else if (payrollEntries.length > 0) {
@@ -1011,11 +1085,12 @@ export default function App() {
                 await syncUpsert('payroll_entries', pe);
               }
             }
-
-            showToast("Base de datos sincronizada completamente.", "success");
           } catch (e) {
-            console.error("Error cargando datos secundarios en segundo plano:", e);
+            console.error("Error cargando payroll_entries en segundo plano:", e);
           }
+
+          initialDataLoadedRef.current = true;
+          showToast("Base de datos sincronizada completamente.", "success");
         };
 
         loadSecondaryData();
