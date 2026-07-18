@@ -111,8 +111,12 @@ export default function Clientes({
       email: clientEmail || "contacto@courier.net",
       phone: clientPhone || "+57 (300) 000-0000",
       address: clientAddress || "Zona de Despliegue",
-      creditLimit: parseFloat(clientCreditLimit.toString()) || 1000,
+      creditLimit: 0,
       outstandingBalance: 0,
+      hasCredit: false,
+      isEmployee: false,
+      specialDiscountPercentage: 0,
+      discountedProductIds: [],
       createdAt: new Date().toISOString(),
       password: '1234', // Default opening password
       code: generatedCode
@@ -171,8 +175,6 @@ export default function Clientes({
       email: clientEmail,
       phone: clientPhone,
       address: clientAddress,
-      creditLimit: parseFloat(clientCreditLimit.toString()),
-      outstandingBalance: editingClient.outstandingBalance,
       password: clientPassword.trim() || editingClient.password || '1234',
       code
     };

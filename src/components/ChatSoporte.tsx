@@ -51,6 +51,9 @@ export default function ChatSoporte({
   });
 
   const [inputText, setInputText] = useState('');
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Voice Note Recording States
@@ -96,9 +99,12 @@ export default function ChatSoporte({
     };
   }, [isRecording]);
 
-  // Auto-scroll on new message
+  // Auto-scroll on new message and active selection
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const timer = setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    return () => clearTimeout(timer);
   }, [chatMessages, selectedClientId]);
 
   // Selected client details
@@ -137,7 +143,6 @@ export default function ChatSoporte({
       currentUser.fullName || 'Operador Búnker'
     );
     setInputText('');
-    showToast("Respuesta codificada transmitida", "info");
   };
 
   const handleStartRecord = () => {
@@ -275,7 +280,26 @@ export default function ChatSoporte({
       'agent',
       currentUser.fullName || 'Operador Búnker'
     );
-    showToast("Respuesta rápida transmitida", "info");
+  };
+
+  const handleSendBulk = () => {
+    if (!bulkText.trim()) return;
+    setIsSendingBulk(true);
+    const corporateClients = clients.filter(c => c.id !== 'c-ocasional');
+    
+    corporateClients.forEach(c => {
+      onSendMessage(
+        c.id,
+        bulkText.trim(),
+        'agent',
+        currentUser.fullName || 'Operador Búnker'
+      );
+    });
+
+    setIsSendingBulk(false);
+    setShowBulkModal(false);
+    setBulkText('');
+    showToast(`Mensaje masivo enviado a ${corporateClients.length} clientes.`, "success");
   };
 
   const handleClear = () => {
@@ -302,7 +326,7 @@ export default function ChatSoporte({
     <div className="space-y-6" id="agent-chat-support">
       
       {/* Module Title */}
-      <div className="bg-gradient-to-r from-cyber-pink/15 to-transparent p-5 rounded-xl border border-cyber-border">
+      <div className="bg-gradient-to-r from-cyber-pink/15 to-transparent p-5 rounded-xl border border-cyber-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-cyber-pink/15 rounded-lg border border-cyber-pink/30 text-cyber-pink">
             <MessageSquare size={22} className="animate-pulse" />
@@ -316,6 +340,14 @@ export default function ChatSoporte({
             </p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowBulkModal(true)}
+          className="bg-cyber-pink hover:bg-cyber-accent text-black font-bold font-mono text-xs px-4 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-2 neon-shadow-pink shrink-0"
+        >
+          <span>📢</span>
+          <span>MENSAJE MASIVO</span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[550px]">
@@ -651,6 +683,75 @@ export default function ChatSoporte({
             alt="Zoomed" 
             className="max-w-full max-h-full rounded-lg shadow-2xl border border-slate-800 object-contain"
           />
+        </div>
+      )}
+
+      {/* Central Bulk Message Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-cyber-card border-2 border-cyber-pink rounded-3xl max-w-md w-full p-6 space-y-5 relative shadow-[0_0_50px_rgba(236,72,153,0.15)] font-mono text-xs text-gray-300">
+            <div className="flex justify-between items-center border-b border-slate-900 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-black text-white tracking-widest">📢 TRANSMISIÓN MASIVA</span>
+              </div>
+              <button 
+                onClick={() => setShowBulkModal(false)}
+                className="text-gray-500 hover:text-white transition-colors cursor-pointer text-sm bg-transparent border-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 leading-relaxed">
+              <p className="text-[10px] text-gray-400">
+                Escriba un mensaje informativo. Este texto se enviará de forma automática e individual al chat de todas las cuentas corporativas configuradas en la base de datos (excepto el cliente ocasional).
+              </p>
+              
+              <div className="space-y-1">
+                <span className="text-[9px] text-cyber-pink font-bold uppercase tracking-wider block">Mensaje a Difundir:</span>
+                <textarea
+                  value={bulkText}
+                  onChange={e => setBulkText(e.target.value)}
+                  placeholder="Escriba el comunicado masivo aquí..."
+                  className="w-full bg-cyber-bg border border-cyber-border rounded-xl p-3.5 h-32 text-xs focus:outline-none focus:border-cyber-pink resize-none text-white font-mono"
+                  disabled={isSendingBulk}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setBulkText('');
+                }}
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-gray-400 font-bold rounded-xl transition-all cursor-pointer border border-slate-800 uppercase tracking-wider"
+                disabled={isSendingBulk}
+              >
+                Cancelar
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleSendBulk}
+                className="px-5 py-2.5 bg-cyber-pink hover:bg-cyber-accent text-black font-extrabold rounded-xl transition-all cursor-pointer shadow-md neon-shadow-pink uppercase tracking-wider flex items-center gap-2"
+                disabled={isSendingBulk || !bulkText.trim()}
+              >
+                {isSendingBulk ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                    <span>Enviando...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>📢</span>
+                    <span>Enviar Masivo</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

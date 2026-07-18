@@ -62,7 +62,8 @@ export const INITIAL_USERS: User[] = [
       imprimir_cartera: true,
       editar_domicilios: true,
       imprimir_domicilios: true,
-      imprimir_cierres: true
+      imprimir_cierres: true,
+      creditos: true
     }
   },
   { 
@@ -111,7 +112,8 @@ export const INITIAL_USERS: User[] = [
       imprimir_cartera: false,
       editar_domicilios: true,
       imprimir_domicilios: true,
-      imprimir_cierres: false
+      imprimir_cierres: false,
+      creditos: false
     }
   },
   { 
@@ -160,7 +162,8 @@ export const INITIAL_USERS: User[] = [
       imprimir_cartera: false,
       editar_domicilios: true,
       imprimir_domicilios: false,
-      imprimir_cierres: false
+      imprimir_cierres: false,
+      creditos: false
     }
   }
 ];
@@ -268,7 +271,13 @@ export const INITIAL_CLIENTS: Client[] = [
     outstandingBalance: 0,
     createdAt: "2026-01-01T00:00:00-05:00",
     code: "CL-9081",
-    password: "1234"
+    password: "1234",
+    hasCredit: false,
+    creditTermsDays: 30,
+    creditConditions: "",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   },
   {
     id: "c-1",
@@ -281,7 +290,13 @@ export const INITIAL_CLIENTS: Client[] = [
     outstandingBalance: 850000.00, // Credited Graphene Shield
     createdAt: "2026-01-15T08:00:00-05:00",
     code: "CL-1402",
-    password: "1234"
+    password: "1234",
+    hasCredit: true,
+    creditTermsDays: 30,
+    creditConditions: "Facturar a 30 días contra entrega de actas",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   },
   {
     id: "c-2",
@@ -290,11 +305,17 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "enlaces@paramocourier.org",
     phone: "+57 (315) 888-2910",
     address: "Hangar de Tránsito, Autopista de Ceniza Km 12",
-    creditLimit: 1000000.00,
+    creditLimit: 0,
     outstandingBalance: 0.00,
     createdAt: "2026-02-10T10:30:00-05:00",
     code: "CL-7839",
-    password: "1234"
+    password: "1234",
+    hasCredit: false,
+    creditTermsDays: 15,
+    creditConditions: "",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   },
   {
     id: "c-3",
@@ -307,7 +328,13 @@ export const INITIAL_CLIENTS: Client[] = [
     outstandingBalance: 450000.00, // Credit for fission battery
     createdAt: "2026-03-01T14:15:00-05:00",
     code: "CL-5056",
-    password: "1234"
+    password: "1234",
+    hasCredit: true,
+    creditTermsDays: 30,
+    creditConditions: "Autorización por departamento médico",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   },
   {
     id: "c-4",
@@ -320,7 +347,13 @@ export const INITIAL_CLIENTS: Client[] = [
     outstandingBalance: 120000.00, // Pending Bio-modulator serum
     createdAt: "2026-04-18T11:00:00-05:00",
     code: "CL-6241",
-    password: "1234"
+    password: "1234",
+    hasCredit: true,
+    creditTermsDays: 15,
+    creditConditions: "Investigaciones científicas autorizadas",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   },
   {
     id: "c-5",
@@ -329,11 +362,17 @@ export const INITIAL_CLIENTS: Client[] = [
     email: "contact@nakamuratrading.jp",
     phone: "+57 (601) 777-8899",
     address: "Distrito Financiero de Neón, Of. 909",
-    creditLimit: 3000000.00,
+    creditLimit: 0,
     outstandingBalance: 0.00,
     createdAt: "2026-05-22T09:45:00-05:00",
     code: "CL-8873",
-    password: "1234"
+    password: "1234",
+    hasCredit: false,
+    creditTermsDays: 30,
+    creditConditions: "",
+    isEmployee: false,
+    specialDiscountPercentage: 0,
+    discountedProductIds: []
   }
 ];
 

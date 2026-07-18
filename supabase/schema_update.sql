@@ -145,5 +145,4 @@ ADD COLUMN IF NOT EXISTS passkey_credential jsonb;
 UPDATE clients 
 SET code = 'CL-' || floor(random() * 9000 + 1000)::text 
 WHERE code IS NULL;
-
-
+    

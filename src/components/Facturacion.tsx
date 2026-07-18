@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User } from '../types';
+import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User, getClientBillingBlockReason } from '../types';
 import CyberEmpty from './CyberEmpty';
 import { 
   ShoppingCart, 
@@ -460,11 +460,32 @@ export default function Facturacion({
     setErrorMsg(null);
   };
 
+  // Calculate block reason
+  const blockReason = selectedClient ? getClientBillingBlockReason(selectedClient, invoices) : null;
+
   // Calculate totals
   const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const taxAmount = 0; // IVA eliminado de la factura
   const preDiscountTotal = subtotal;
-  const total = Math.max(0, preDiscountTotal - discount) + (isDelivery ? deliveryFee : 0);
+
+  // Special discount math (non-cumulative)
+  const specialDiscount = React.useMemo(() => {
+    if (!selectedClient || !selectedClient.specialDiscountPercentage || selectedClient.specialDiscountPercentage <= 0) return 0;
+    const pct = selectedClient.specialDiscountPercentage;
+    const isSpecific = selectedClient.discountedProductIds && selectedClient.discountedProductIds.length > 0;
+    
+    if (!isSpecific) {
+      return parseFloat((subtotal * (pct / 100)).toFixed(2));
+    } else {
+      const discountableSum = cartItems
+        .filter(item => selectedClient.discountedProductIds?.includes(item.productId))
+        .reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      return parseFloat((discountableSum * (pct / 100)).toFixed(2));
+    }
+  }, [selectedClient, cartItems, subtotal]);
+
+  const effectiveDiscount = specialDiscount > 0 ? specialDiscount : discount;
+  const total = Math.max(0, preDiscountTotal - effectiveDiscount) + (isDelivery ? deliveryFee : 0);
 
   // Check credit constraints
   const creditAvailable = selectedClient 
@@ -509,14 +530,25 @@ export default function Facturacion({
       return;
     }
 
-    if (paymentMethod.toLowerCase().includes('cred') && clientToUse.id === 'c-ocasional') {
-      setErrorMsg("❌ CRÉDITO RESTRINGIDO: El Cliente Ocasional no puede realizar compras a crédito.");
-      return;
+    if (paymentMethod.toLowerCase().includes('cred')) {
+      if (clientToUse.id === 'c-ocasional') {
+        setErrorMsg("❌ CRÉDITO RESTRINGIDO: El Cliente Ocasional no puede realizar compras a crédito.");
+        return;
+      }
+      if (!clientToUse.hasCredit) {
+        setErrorMsg(`❌ CRÉDITO RESTRINGIDO: El cliente "${clientToUse.name}" no tiene autorizada una línea de crédito.`);
+        return;
+      }
+      const availableLimit = clientToUse.creditLimit - clientToUse.outstandingBalance;
+      if (total > availableLimit) {
+        setErrorMsg(`❌ CUPO EXCEDIDO: El cliente "${clientToUse.name}" solo dispone de $${availableLimit.toFixed(2)} de crédito.`);
+        return;
+      }
     }
 
-    const availableLimit = clientToUse.creditLimit - clientToUse.outstandingBalance;
-    if (paymentMethod.toLowerCase().includes('cred') && total > availableLimit) {
-      setErrorMsg(`❌ CUPO EXCEDIDO: El cliente "${clientToUse.name}" solo dispone de $${availableLimit.toFixed(2)} de crédito.`);
+    const blockCheck = getClientBillingBlockReason(clientToUse, invoices);
+    if (blockCheck) {
+      setErrorMsg(`❌ FACTURACIÓN BLOQUEADA: ${blockCheck}`);
       return;
     }
 
@@ -537,7 +569,7 @@ export default function Facturacion({
       clientRut: clientToUse.rut,
       items: cartItems,
       subtotal,
-      discount,
+      discount: effectiveDiscount,
       taxRate: 0, // IVA eliminado
       taxAmount: 0, // IVA eliminado
       total,
@@ -964,87 +996,113 @@ export default function Facturacion({
 
       {/* RIGHT: Transaction summary & Checkout parameters (4 cols) */}
       <div className="lg:col-span-4 space-y-6">
-        
-        {/* Cost breakdown */}
-        <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-white tracking-wider uppercase font-mono flex items-center gap-2 border-b border-cyber-border pb-3">
-            <ShoppingCart size={15} className="text-cyber-orange" />
-            RESUMEN DE FACTURA
-          </h2>
-
-          <div className="space-y-2 text-xs font-mono">
-            <div className="flex justify-between text-gray-400">
-              <span>Subtotal:</span>
-              <span className="text-white">${subtotal.toFixed(2)}</span>
+        {blockReason ? (
+          <div className="bg-red-950/20 border-2 border-red-500 rounded-xl p-6 text-center space-y-4 shadow-[0_0_30px_rgba(239,68,68,0.25)] font-mono">
+            <div className="text-4xl text-red-500 animate-bounce">⚠️</div>
+            <h3 className="text-xs font-black text-red-400 uppercase tracking-widest">BLOQUEO CRÍTICO: FACTURACIÓN SUSPENDIDA</h3>
+            <p className="text-[11px] text-gray-300 leading-relaxed max-w-sm mx-auto">
+              El sistema de seguridad ha bloqueado la emisión de nuevas facturas para este cliente por políticas de riesgo:
+            </p>
+            <div className="bg-black/40 border border-red-950/80 p-3.5 rounded-xl text-[10px] text-red-400 font-bold leading-normal text-left">
+              {blockReason}
             </div>
-            {isDelivery && (
-              <div className="flex justify-between text-cyber-orange">
-                <span>Renglón Domicilio:</span>
-                <span className="font-bold">+${deliveryFee.toFixed(2)}</span>
-              </div>
-            )}
+            <p className="text-[9px] text-gray-500 italic">
+              Por favor contacte al Administrador del Búnker para habilitar cupo o registrar los abonos en la cartera de Cuentas por Cobrar.
+            </p>
+            <button
+              type="button"
+              onClick={() => setSelectedClient(null)}
+              className="w-full bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer shadow-md shadow-red-900/20"
+            >
+              Deseleccionar Cliente Bloqueado
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Cost breakdown */}
+            <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-4">
+              <h2 className="text-sm font-semibold text-white tracking-wider uppercase font-mono flex items-center gap-2 border-b border-cyber-border pb-3">
+                <ShoppingCart size={15} className="text-cyber-orange" />
+                RESUMEN DE FACTURA
+              </h2>
 
-            <div className="space-y-1.5 pt-2 border-t border-slate-800">
-              <div className="flex justify-between items-center">
-                <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (COP):</label>
-                {!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true) && !discountAuthorizedBy && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDiscountAuthModal(true)}
-                    className="text-[9px] bg-cyber-pink/15 hover:bg-cyber-pink/25 border border-cyber-pink/30 text-cyber-pink px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                  >
-                    🔑 Autorizar
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <input 
-                  type="number" 
-                  value={discount} 
-                  disabled={!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)}
-                  onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className={`bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-right pr-6 font-mono font-bold ${
-                    !(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)
-                      ? 'opacity-60 cursor-not-allowed border-slate-800'
-                      : ''
-                  }`}
-                  placeholder={!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy) ? "Bloqueado" : "0"}
-                />
-                <span className="absolute right-2.5 top-2 text-[10px] text-gray-500">$</span>
-              </div>
-              {discountAuthorizedBy && (
-                <div className="text-[9px] text-cyber-green font-mono flex items-center justify-between">
-                  <span>✓ Autorizado por {discountAuthorizedBy}</span>
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      setDiscountAuthorizedBy(null);
-                      setDiscount(0);
-                    }} 
-                    className="text-[8px] text-red-400 hover:underline cursor-pointer"
-                  >
-                    Revocar
-                  </button>
+              <div className="space-y-2 text-xs font-mono">
+                <div className="flex justify-between text-gray-400">
+                  <span>Subtotal:</span>
+                  <span className="text-white">${subtotal.toFixed(2)}</span>
                 </div>
-              )}
-            </div>
+                {isDelivery && (
+                  <div className="flex justify-between text-cyber-orange">
+                    <span>Renglón Domicilio:</span>
+                    <span className="font-bold">+${deliveryFee.toFixed(2)}</span>
+                  </div>
+                )}
 
-            {activePromos.length > 0 && (
-              <div className="space-y-1 pt-1.5">
-                <label className="block text-[9px] text-gray-500 uppercase tracking-wider">Aplicar Promoción Activa:</label>
-                <select 
-                  onChange={e => handleSelectPromo(e.target.value)}
-                  className="bg-cyber-bg border border-cyber-border text-white text-[11px] p-2 rounded-lg w-full focus:outline-none font-mono"
-                >
-                  <option value="">-- Seleccionar Promoción --</option>
-                  {activePromos.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.type === 'porcentaje' ? `${p.value}%` : `$${p.value} COP`})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+                <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                  <div className="flex justify-between items-center">
+                    <label className="block text-[10px] text-gray-400 uppercase tracking-wider">Descuento Global (COP):</label>
+                    {!(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true) && !discountAuthorizedBy && !(selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => setShowDiscountAuthModal(true)}
+                        className="text-[9px] bg-cyber-pink/15 hover:bg-cyber-pink/25 border border-cyber-pink/30 text-cyber-pink px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        🔑 Autorizar
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      value={effectiveDiscount} 
+                      disabled={(selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0) || !(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)}
+                      onChange={e => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className={`bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink text-right pr-6 font-mono font-bold ${
+                        (selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0) || !(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy)
+                          ? 'opacity-60 cursor-not-allowed border-slate-800'
+                          : ''
+                      }`}
+                      placeholder={(selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0) ? "Auto" : !(currentUser.role === 'Administrador' || currentUser.permissions?.autorizar_descuentos === true || discountAuthorizedBy) ? "Bloqueado" : "0"}
+                    />
+                    <span className="absolute right-2.5 top-2 text-[10px] text-gray-500">$</span>
+                  </div>
+                  {selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0 ? (
+                    <div className="text-[9px] text-cyber-pink font-mono mt-1">
+                      ✓ Descuento especial de cliente ({selectedClient.specialDiscountPercentage}%) aplicado. No acumulable.
+                    </div>
+                  ) : discountAuthorizedBy && (
+                    <div className="text-[9px] text-cyber-green font-mono flex items-center justify-between">
+                      <span>✓ Autorizado por {discountAuthorizedBy}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setDiscountAuthorizedBy(null);
+                          setDiscount(0);
+                        }} 
+                        className="text-[8px] text-red-400 hover:underline cursor-pointer"
+                      >
+                        Revocar
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {activePromos.length > 0 && !(selectedClient && selectedClient.specialDiscountPercentage && selectedClient.specialDiscountPercentage > 0) && (
+                  <div className="space-y-1 pt-1.5">
+                    <label className="block text-[9px] text-gray-500 uppercase tracking-wider">Aplicar Promoción Activa:</label>
+                    <select 
+                      onChange={e => handleSelectPromo(e.target.value)}
+                      className="bg-cyber-bg border border-cyber-border text-white text-[11px] p-2 rounded-lg w-full focus:outline-none font-mono"
+                    >
+                      <option value="">-- Seleccionar Promoción --</option>
+                      {activePromos.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.type === 'porcentaje' ? `${p.value}%` : `$${p.value} COP`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
             <div className="flex justify-between text-sm font-bold text-white pt-3 border-t border-slate-800">
               <span>Total a Liquidar:</span>
@@ -1346,7 +1404,8 @@ export default function Facturacion({
           <CheckCircle size={15} />
           DESPACHAR FACTURA Y COMPROBANTE
         </button>
-
+          </>
+        )}
       </div>
 
       {/* MODAL / OVERLAY: Supervisor Discount Authorization */}

@@ -436,8 +436,9 @@ export default function AtomBubble({
       {/* FLOATING CHAT WIDGET BOX */}
       {isOpen && (
         <div 
-          className="fixed bottom-24 right-5 w-[360px] sm:w-[380px] h-[520px] bg-cyber-card/95 border border-cyber-border rounded-2xl flex flex-col z-50 shadow-[0_0_30px_rgba(4,7,14,0.85)] overflow-hidden font-mono text-xs backdrop-blur-md select-text"
-          style={{ marginRight: type === 'agent' ? '70px' : '0px' }}
+          className={`fixed bottom-24 right-4 left-4 sm:left-auto sm:right-5 sm:w-[380px] h-[520px] bg-cyber-card/95 border border-cyber-border rounded-2xl flex flex-col z-50 shadow-[0_0_30px_rgba(4,7,14,0.85)] overflow-hidden font-mono text-xs backdrop-blur-md select-text ${
+            type === 'agent' ? 'mr-0 sm:mr-[70px]' : ''
+          }`}
         >
           
           {/* CHAT HEADER */}
@@ -448,7 +449,7 @@ export default function AtomBubble({
                 <span className="text-[9px] text-gray-500 block uppercase tracking-wider">
                   {type === 'client' ? 'Soporte Rosa Fuerte' : 'Atención Rápida Cliente'}
                 </span>
-                <span className="font-bold text-white text-xs block truncate max-w-[190px]">
+                <span className="font-bold text-white text-xs block truncate max-w-[130px] xs:max-w-[180px] sm:max-w-[200px]">
                   {type === 'client' 
                     ? (activeClient?.assignedAgentName || 'Operaciones General')
                     : (activeClient ? activeClient.name : 'Seleccionar Chat')}
@@ -523,7 +524,7 @@ export default function AtomBubble({
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white truncate block max-w-[170px]">{c.name}</span>
+                          <span className="font-bold text-white truncate block max-w-[120px] xs:max-w-[170px]">{c.name}</span>
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                             isAssignedToMe ? 'bg-cyber-pink' : isUnassigned ? 'bg-amber-400' : 'bg-gray-600'
                           }`} />

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage } from '../types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
   Truck, 
@@ -75,7 +75,7 @@ export default function PortalCliente({
 }: PortalClienteProps) {
   
   // Navigation
-  const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion'>('pedido');
+  const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial'>('pedido');
 
   // Sound and Alerter preferences state
   const [chatTone, setChatTone] = useState(client.chatSoundTone || 'Predeterminado');
@@ -272,6 +272,7 @@ export default function PortalCliente({
 
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
+  const blockReason = useMemo(() => getClientBillingBlockReason(client, invoices), [client, invoices]);
   const displayMessages = clientChatMessages.length > 0 ? clientChatMessages : [
     {
       id: 'default-welcome',
@@ -301,7 +302,23 @@ export default function PortalCliente({
     ? parseFloat(((cartSubtotal + deliveryCost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2))
     : 0;
 
-  const cartTotal = cartSubtotal + cartTax + deliveryCost + cardFee;
+  // Administrator-configured unique client discount (non-cumulative)
+  const clientDiscount = useMemo(() => {
+    if (!client.specialDiscountPercentage || client.specialDiscountPercentage <= 0) return 0;
+    const pct = client.specialDiscountPercentage;
+    const isSpecific = client.discountedProductIds && client.discountedProductIds.length > 0;
+    
+    if (!isSpecific) {
+      return cartSubtotal * (pct / 100);
+    } else {
+      const discountableSum = cart
+        .filter(item => client.discountedProductIds?.includes(item.product.id))
+        .reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+      return discountableSum * (pct / 100);
+    }
+  }, [client, cart, cartSubtotal]);
+
+  const cartTotal = Math.max(0, cartSubtotal - clientDiscount) + cartTax + deliveryCost + cardFee;
 
   // 1. Pre-generate order number when entering checkout step 3 (payment)
   useEffect(() => {
@@ -370,105 +387,17 @@ export default function PortalCliente({
     return () => window.removeEventListener('message', handleBoldMessage);
   }, [currentOrderNum, cartTotal]);
 
-  // 5. Restore pending Bold order on page load if redirect callback params are detected
+  // Deleted redundant Bold restoration - now fully handled in App.tsx
+
+  // Auto scroll chat to bottom with rendering yield
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const boldTxStatus = params.get('bold-tx-status');
-    const boldStatus = params.get('bold_status');
-    const boldOrderId = params.get('bold-order-id');
-
-    const isApproved = boldStatus === 'success' || 
-                       boldTxStatus === 'approved' || 
-                       boldTxStatus === 'success';
-
-    if (isApproved) {
-      const pendingStr = localStorage.getItem('pending_bold_order');
-      if (pendingStr) {
-        try {
-          const pending = JSON.parse(pendingStr);
-          // Verify client match and (if provided) order ID match
-          const matchesOrder = !boldOrderId || pending.orderNum === boldOrderId;
-          if (pending.client && pending.client.id === client.id && matchesOrder) {
-            const invoiceItems = pending.cart.map((item: any) => ({
-              productId: item.product.id,
-              productName: item.product.name,
-              price: item.product.price,
-              quantity: item.quantity,
-              taxAmount: 0,
-              total: item.product.price * item.quantity
-            }));
-            
-            const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
-            const tax = 0;
-            const cost = pending.deliveryMethod === 'oficina' ? 15000.00 : 0.00;
-            
-            // Recompute card fee on callback restoration
-            const fee = config.cardFeeEnabled ? parseFloat(((subtotal + cost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2)) : 0;
-            const total = subtotal + tax + cost + fee;
-
-            const newInvoice: Invoice = {
-              id: `inv-client-${Date.now()}`,
-              invoiceNumber: pending.orderNum,
-              clientId: client.id,
-              clientName: client.name,
-              clientRut: client.rut,
-              items: invoiceItems,
-              subtotal: subtotal,
-              discount: 0,
-              taxRate: 0,
-              taxAmount: 0,
-              total: total,
-              paymentMethod: 'Bold',
-              paymentStatus: 'Pagado',
-              dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              createdAt: new Date().toISOString(),
-              cashierName: 'Portal Online',
-              isDelivery: pending.deliveryMethod !== 'recoge',
-              deliveryFee: cost,
-              deliveryRider: pending.deliveryMethod === 'recoge' ? 'N/A' : (pending.deliveryMethod === 'cliente' ? 'Asignado por Client' : 'Por Asignar'),
-              deliveryTransport: pending.deliveryMethod === 'recoge' ? 'N/A' : pending.deliveryTransport,
-              deliveryStatus: 'Pendiente',
-              deliveryMethod: pending.deliveryMethod,
-              guideAddress: pending.deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : pending.deliveryAddress,
-              cardFee: fee > 0 ? fee : undefined
-            };
-
-            onAddInvoice(newInvoice);
-
-
-            setCart([]);
-            setCheckoutStep('cart');
-            setCurrentOrderNum('');
-            localStorage.removeItem('pending_bold_order');
-            
-            showToast(`¡Pago Bold Exitoso! Pedido #${pending.orderNum} procesado.`, "success");
-
-            setTimeout(() => {
-              onSendMessage(
-                client.id,
-                `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${pending.orderNum} por $${total.toLocaleString('es-CO')} COP. Modalidad: ${
-                  pending.deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
-                }. Pago: Bold. Un despachador de Rosa Fuerte está preparando la carga.`,
-                'agent',
-                'Asistente Digital'
-              );
-            }, 1500);
-
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-            setActiveTab('trayectoria');
-          }
-        } catch (e) {
-          console.error("Error restoring pending Bold order", e);
-        }
-      }
+    if (activeTab === 'chat') {
+      const timer = setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, []);
-
-  // Auto scroll chat to bottom
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, isAgentTyping]);
+  }, [chatMessages, isAgentTyping, activeTab]);
 
   // Handle client adding to cart
   const addToCart = (product: Product) => {
@@ -730,6 +659,41 @@ export default function PortalCliente({
 
   return (
     <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex flex-col relative overflow-x-hidden scanlines">
+      {blockReason && activeTab !== 'chat' && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-cyber-card border-2 border-red-500 rounded-3xl max-w-md w-full p-6 text-center space-y-5 relative shadow-[0_0_50px_rgba(239,68,68,0.25)] font-mono">
+            <div className="text-5xl text-red-500 animate-pulse">🛑</div>
+            <div>
+              <h2 className="text-sm font-black text-red-500 tracking-widest uppercase">
+                CUENTA SUSPENDIDA / BLOQUEADA
+              </h2>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                Estimado cliente, los servidores de Rosa Fuerte han suspendido temporalmente la facturación y los despachos online de tu facción debido al siguiente reporte de riesgo:
+              </p>
+            </div>
+            <div className="bg-red-950/20 border border-red-500/30 rounded-xl p-4 text-[10px] text-red-400 leading-normal text-left font-bold bg-black/50">
+              {blockReason}
+            </div>
+            <p className="text-[9px] text-gray-500">
+              Para restablecer tu conexión operativa, comunícate con la central de soporte o realiza tus abonos correspondientes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setActiveTab('chat')}
+                className="flex-1 py-2.5 bg-cyber-pink hover:bg-cyber-accent text-black font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-md neon-shadow-pink uppercase"
+              >
+                💬 Hablar con Soporte
+              </button>
+              <button
+                onClick={onLogout}
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-gray-400 font-bold text-xs rounded-xl cursor-pointer transition-all border border-slate-800 uppercase"
+              >
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Background visual art element */}
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none opacity-[0.10] mix-blend-lighten"

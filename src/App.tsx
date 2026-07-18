@@ -50,6 +50,7 @@ import SolicitudesClientes from './components/SolicitudesClientes';
 import HistorialFacturas from './components/HistorialFacturas';
 import Nomina from './components/Nomina';
 import RestrictedAccess from './components/RestrictedAccess';
+import Creditos from './components/Creditos';
 import { playTone } from './utils/soundService';
 import AtomBubble from './components/AtomBubble';
 
@@ -81,7 +82,8 @@ import {
   MessageSquare,
   Inbox,
   DollarSign,
-  Fingerprint
+  Fingerprint,
+  Percent
 } from 'lucide-react';
 
 export function getUserPermissions(user: User): UserPermissions {
@@ -106,6 +108,7 @@ export function getUserPermissions(user: User): UserPermissions {
     solicitudes_clientes: true,
     historial_facturas: true,
     nomina: isDocAdmin,
+    creditos: isDocAdmin,
 
     crear_factura: true,
     editar_cliente: true,
@@ -437,6 +440,19 @@ export default function App() {
         playTone('Predeterminado');
       }
       showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toLocaleString('es-CO')} COP.`, "warning");
+      
+      // Native system push notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification('Rosa Fuerte - Pedido Online', {
+            body: `🚨 ¡Nueva orden! Pedido ${newOnlineInvoices[0].invoiceNumber} por $${newOnlineInvoices[0].total.toLocaleString('es-CO')} COP.`,
+            icon: '/images/logo_cyberpunk_1783131526095.jpg'
+          });
+        } catch (err) {
+          console.error("Failed to display native notification:", err);
+        }
+      }
+      
       mountTimeRef.current = new Date();
     }
   }, [invoices, soundSettings]);
@@ -474,10 +490,34 @@ export default function App() {
       if (soundSettings.soundEnabled && soundSettings.chatSoundEnabled) {
         playTone(soundSettings.defaultTone as any);
       }
+      
+      // Native system push notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(`Rosa Fuerte - Chat de ${lastMsg.senderName || 'Cliente'}`, {
+            body: lastMsg.text,
+            icon: '/images/logo_cyberpunk_1783131526095.jpg'
+          });
+        } catch (err) {
+          console.error("Failed to display native chat notification:", err);
+        }
+      }
     } else if (lastMsg.sender === 'agent' && currentClient) {
       // Incoming message for client
       const tone = currentClient.chatSoundTone || 'Predeterminado';
       playTone(tone as any);
+      
+      // Native system push notification for client
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(`Rosa Fuerte - Soporte`, {
+            body: lastMsg.text,
+            icon: '/images/logo_cyberpunk_1783131526095.jpg'
+          });
+        } catch (err) {
+          console.error("Failed to display native client chat notification:", err);
+        }
+      }
     }
   }, [chatMessages, currentClient, soundSettings]);
 
@@ -875,7 +915,16 @@ export default function App() {
             }
 
             if (dbInvoices && dbInvoices.length > 0) {
-              setInvoices(dbInvoices);
+              setInvoices(prev => {
+                const merged = [...prev];
+                dbInvoices.forEach(dbInv => {
+                  const exists = merged.some(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+                  if (!exists) {
+                    merged.push(dbInv);
+                  }
+                });
+                return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+              });
             } else if (invoices.length > 0) {
               for (const inv of invoices) {
                 await syncUpsert('invoices', inv);
@@ -915,7 +964,16 @@ export default function App() {
             }
 
             if (dbChatMessages && dbChatMessages.length > 0) {
-              setChatMessages(dbChatMessages);
+              setChatMessages(prev => {
+                const merged = [...prev];
+                dbChatMessages.forEach(dbMsg => {
+                  const exists = merged.some(m => m.id === dbMsg.id);
+                  if (!exists) {
+                    merged.push(dbMsg);
+                  }
+                });
+                return merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
+              });
             } else if (chatMessages.length > 0) {
               for (const msg of chatMessages) {
                 await syncUpsert('chat_messages', msg);
@@ -970,6 +1028,10 @@ export default function App() {
     };
 
     loadAllData();
+    // Request permission for native system push notifications
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(e => console.error("Notification permission request failed:", e));
+    }
   }, []);
 
   // Handle Bold payment redirect callback at root level (on mount)
@@ -977,11 +1039,12 @@ export default function App() {
     if (!isSupabaseEnabled) return;
 
     const params = new URLSearchParams(window.location.search);
-    const boldTxStatus = params.get('bold-tx-status');
-    const boldStatus = params.get('bold_status');
-    const boldOrderId = params.get('bold-order-id');
+    const boldTxStatus = params.get('bold-tx-status') || params.get('tx-status');
+    const boldStatus = params.get('bold_status') || params.get('status') || params.get('bold-status');
+    const boldOrderId = params.get('bold-order-id') || params.get('order-id');
 
     const isApproved = boldStatus === 'success' || 
+                       boldStatus === 'approved' || 
                        boldTxStatus === 'approved' || 
                        boldTxStatus === 'success';
 
@@ -1038,25 +1101,23 @@ export default function App() {
               cardFee: fee > 0 ? fee : undefined
             };
 
-            // 1. Evitar duplicar factura si ya se procesó
-            setInvoices(prev => {
-              if (prev.some(inv => inv.invoiceNumber === orderNum)) return prev;
-              return [newInvoice, ...prev];
-            });
+            // 1. Evitar duplicar factura si ya se procesó (validación síncrona contra estado actual)
+            const isDuplicate = invoices.some(inv => inv.invoiceNumber === orderNum);
 
-            // 2. Sincronizar en Supabase
-            syncUpsert('invoices', newInvoice);
+            if (!isDuplicate) {
+              handleAddInvoice(newInvoice);
+            }
 
-            // 3. Loguear automáticamente al cliente para restaurar su sesión
+            // 2. Loguear automáticamente al cliente para restaurar su sesión
             setCurrentClient(clientObj);
 
-            // 4. Agregar mensaje de chat de soporte automático
+            // 3. Agregar mensaje de chat de soporte automático
             setTimeout(() => {
               const chatMsgId = `msg-${Date.now()}`;
               const chatMsg = {
                 id: chatMsgId,
                 clientId: clientObj.id,
-                sender: 'agent',
+                sender: 'agent' as const,
                 senderName: 'Asistente Digital',
                 text: `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${total.toLocaleString('es-CO')} COP. Modalidad: ${
                   pending.deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
@@ -1067,7 +1128,7 @@ export default function App() {
               syncUpsert('chat_messages', chatMsg);
             }, 1500);
 
-            // 5. Limpieza de LocalStorage y URL
+            // 4. Limpieza de LocalStorage y URL
             localStorage.removeItem('pending_bold_order');
             
             showToast(`¡Pago Bold Exitoso! Pedido #${orderNum} procesado.`, "success");
@@ -1080,7 +1141,7 @@ export default function App() {
         }
       }
     }
-  }, [isSupabaseEnabled, config]);
+  }, [isSupabaseEnabled, config, invoices, clients, products, shifts]);
 
   // Real-time synchronization (polling) for Supabase databases (chat, requests, invoices, products, shifts)
   useEffect(() => {
@@ -1091,12 +1152,22 @@ export default function App() {
       try {
         const dbChatMessages = await fetchTable('chat_messages');
         if (dbChatMessages && dbChatMessages.length > 0) {
-          // Sort by ID to ensure stable JSON comparison
-          const sortedNew = [...dbChatMessages].sort((a, b) => a.id.localeCompare(b.id));
           setChatMessages(prev => {
-            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
-            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return dbChatMessages;
+            const merged = [...prev];
+            dbChatMessages.forEach(dbMsg => {
+              const idx = merged.findIndex(m => m.id === dbMsg.id);
+              if (idx >= 0) {
+                merged[idx] = dbMsg;
+              } else {
+                merged.push(dbMsg);
+              }
+            });
+            const sortedMerged = merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
+            
+            const idsPrev = prev.map(m => m.id).join(',');
+            const idsMerged = sortedMerged.map(m => m.id).join(',');
+            if (idsPrev !== idsMerged || prev.length !== sortedMerged.length) {
+              return sortedMerged;
             }
             return prev;
           });
@@ -1123,11 +1194,22 @@ export default function App() {
       try {
         const dbInvoices = await fetchTable('invoices');
         if (dbInvoices && dbInvoices.length > 0) {
-          const sortedNew = [...dbInvoices].sort((a, b) => a.id.localeCompare(b.id));
           setInvoices(prev => {
-            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
-            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return dbInvoices;
+            const merged = [...prev];
+            dbInvoices.forEach(dbInv => {
+              const idx = merged.findIndex(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+              if (idx >= 0) {
+                merged[idx] = dbInv;
+              } else {
+                merged.push(dbInv);
+              }
+            });
+            const sortedMerged = merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            
+            const idsPrev = prev.map(i => i.id).join(',');
+            const idsMerged = sortedMerged.map(i => i.id).join(',');
+            if (idsPrev !== idsMerged || prev.length !== sortedMerged.length) {
+              return sortedMerged;
             }
             return prev;
           });
@@ -1863,6 +1945,7 @@ export default function App() {
     { id: 'caja', label: 'Apertura / Cierre Caja', icon: Key, color: 'text-cyber-green', shortcut: 'Ctrl+A' },
     { id: 'historial_cierres', label: 'Historial de Cierres', icon: FileText, color: 'text-cyber-pink' },
     { id: 'cartera', label: 'Cuentas por Cobrar', icon: Briefcase, color: 'text-cyber-orange' },
+    { id: 'creditos', label: 'Créditos y Descuentos', icon: Percent, color: 'text-cyber-blue' },
     { id: 'gastos', label: 'Gastos de Turno', icon: ArrowDownCircle, color: 'text-cyber-pink' },
     { id: 'identificadortlf', label: 'Identificador Telefónico', icon: Phone, color: 'text-cyber-blue' },
     { id: 'chatsoporte', label: 'Soporte Chat', icon: MessageSquare, color: 'text-cyber-pink' },
@@ -2463,11 +2546,11 @@ export default function App() {
                 referrerPolicy="no-referrer"
               />
             </div>
-            <div>
-              <h1 className="text-sm font-extrabold text-white tracking-wider font-mono">
+            <div className="min-w-0">
+              <h1 className="text-[10px] xs:text-xs sm:text-sm font-extrabold text-white tracking-wider font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-[125px] xs:max-w-[170px] sm:max-w-none">
                 {config.companyName.toUpperCase()}
               </h1>
-              <p className="text-[10px] text-cyber-pink font-mono tracking-widest mt-0.5">
+              <p className="text-[8px] sm:text-[10px] text-cyber-pink font-mono tracking-widest mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[125px] xs:max-w-[170px] sm:max-w-none hidden sm:block">
                 Tu Seguridad y disfrute Es Nuestra Prioridad
               </p>
             </div>
@@ -2475,17 +2558,18 @@ export default function App() {
         </div>
 
         {/* Global metadata status block */}
-        <div className="flex items-center gap-4 text-xs font-mono">
+        <div className="flex items-center gap-1.5 sm:gap-4 text-xs font-mono">
           <div className="hidden md:flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-lg border border-cyber-border">
             <span className="w-2 h-2 rounded-full bg-cyber-green animate-ping"></span>
             <span className="text-gray-400">OPERADOR:</span>
             <span className="text-white font-bold">{currentUser.fullName}</span>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-lg border border-cyber-border">
-            <Clock size={13} className="text-cyber-orange animate-spin-slow" />
+          <div className="hidden sm:flex items-center gap-1 bg-slate-900 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-cyber-border text-[10px] sm:text-xs">
+            <Clock size={11} className="text-cyber-orange animate-spin-slow" />
             <span className="text-white font-bold">
-              {currentTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              {currentTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+              <span>:{currentTime.toLocaleTimeString('es-ES', { second: '2-digit' })}</span>
             </span>
           </div>
 
@@ -2493,12 +2577,12 @@ export default function App() {
           <div className="relative">
             <button
               onClick={() => setShowNotifDropdown(!showNotifDropdown)}
-              className="relative flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all"
+              className="relative flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-1.5 sm:p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all text-xs sm:text-sm"
               title="Notificaciones de Compras Web"
             >
-              <span className="text-sm">🔔</span>
+              <span className="text-xs sm:text-sm">🔔</span>
               {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-[#E82E3E] text-white text-[8px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center animate-bounce shadow-md">
+                <span className="absolute -top-1.5 -right-1.5 bg-[#E82E3E] text-white text-[8px] font-black w-4 sm:w-4.5 h-4 sm:h-4.5 rounded-full flex items-center justify-center animate-bounce shadow-md">
                   {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length}
                 </span>
               )}
@@ -2553,7 +2637,7 @@ export default function App() {
           {/* Fullscreen Toggle Button */}
           <button 
             onClick={toggleFullscreen}
-            className="flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all"
+            className="hidden sm:flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all"
             title={isFullscreen ? 'Salir de Pantalla Completa' : 'Modo Pantalla Completa'}
           >
             {isFullscreen ? <Minimize size={14} className="text-cyber-pink" /> : <Maximize size={14} className="text-cyber-pink" />}
@@ -2786,6 +2870,16 @@ export default function App() {
               invoices={invoices}
               clients={clients}
               onAddPayment={handleAddPayment}
+            />
+          )}
+
+          {activeTab === 'creditos' && getUserPermissions(currentUser).creditos !== false && (
+            <Creditos 
+              clients={clients}
+              products={products}
+              invoices={invoices}
+              onUpdateClient={handleUpdateClient}
+              currentUser={currentUser}
             />
           )}
 

@@ -16,6 +16,12 @@ export interface Client {
   notifSoundTone?: string;
   code?: string;
   passkeyCredential?: any;
+  hasCredit?: boolean;
+  creditTermsDays?: number;
+  creditConditions?: string;
+  isEmployee?: boolean;
+  specialDiscountPercentage?: number;
+  discountedProductIds?: string[];
 }
 
 export interface Product {
@@ -192,6 +198,7 @@ export interface UserPermissions {
   solicitudes_clientes: boolean;
   historial_facturas: boolean;
   nomina: boolean;
+  creditos?: boolean;
 
   // Procesos y Operaciones Críticas
   crear_factura: boolean;
@@ -273,6 +280,7 @@ export interface ChatMessage {
   senderName: string;
   text: string;
   timestamp: string; // ISO String
+  createdAt?: string; // Database sync timestamp
   attachment?: ChatAttachment;
   agentId?: string;
 }
@@ -308,6 +316,32 @@ export interface StockTransfer {
   createdAt: string;
   resolvedAt?: string;
   supportNotes?: string; // Soportes / Notas de soporte
+}
+
+export function getClientBillingBlockReason(client: Client, invoices: Invoice[]): string | null {
+  if (client.id === 'c-ocasional') return null; // Occasional clients are never blocked
+  
+  // 1. Check Credit Limit Exceeded
+  if (client.hasCredit && client.outstandingBalance >= client.creditLimit) {
+    return `CUPO EXCEDIDO: El saldo pendiente de la cuenta ($${client.outstandingBalance.toLocaleString('es-CO')} COP) ha alcanzado o superado el límite de crédito configurado ($${client.creditLimit.toLocaleString('es-CO')} COP).`;
+  }
+  
+  // 2. Check Mora (Past due date)
+  const today = new Date().toISOString().split('T')[0];
+  const clientInvoices = invoices.filter(inv => inv.clientId === client.id);
+  const unpaidPastDueInvoices = clientInvoices.filter(inv => 
+    inv.paymentStatus === 'Pendiente' && 
+    inv.dueDate && 
+    inv.dueDate < today
+  );
+  
+  if (unpaidPastDueInvoices.length > 0) {
+    const overdueCount = unpaidPastDueInvoices.length;
+    const oldestOverdue = unpaidPastDueInvoices.sort((a,b) => a.dueDate.localeCompare(b.dueDate))[0];
+    return `CLIENTE EN MORA: Registra ${overdueCount} factura(s) pendiente(s) vencida(s). Factura más antigua: ${oldestOverdue.invoiceNumber} con vencimiento el ${oldestOverdue.dueDate}.`;
+  }
+  
+  return null;
 }
 
 
