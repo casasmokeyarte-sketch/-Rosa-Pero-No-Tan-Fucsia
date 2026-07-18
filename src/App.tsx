@@ -1430,6 +1430,16 @@ export default function App() {
     // A. Add Invoice to ledger
     setInvoices(prev => [...prev, newInvoice]);
 
+    const isPurchaseOrder = newInvoice.paymentStatus === 'Orden de Compra';
+
+    if (isPurchaseOrder) {
+      showToast(`Nueva orden de compra #${newInvoice.invoiceNumber} recibida en espera de aprobación`, "info");
+      if (isSupabaseEnabled) {
+        syncUpsert('invoices', newInvoice);
+      }
+      return;
+    }
+
     // B. Deduct product inventory from stock or cashier's personal stock and write stock adjustments
     setProducts(prevProducts => {
       return prevProducts.map(p => {
@@ -1555,6 +1565,93 @@ export default function App() {
   };
 
   const handleUpdateInvoice = (updatedInvoice: Invoice) => {
+    const oldInvoice = invoices.find(inv => inv.id === updatedInvoice.id);
+
+    // 1. Si pasa de 'Orden de Compra' a 'Pendiente' o 'Pagado' (Aprobación), descontar stock de bodega principal
+    const isApprovingOrder = oldInvoice && 
+      oldInvoice.paymentStatus === 'Orden de Compra' && 
+      (updatedInvoice.paymentStatus === 'Pendiente' || updatedInvoice.paymentStatus === 'Pagado');
+
+    if (isApprovingOrder) {
+      setProducts(prevProducts => {
+        return prevProducts.map(p => {
+          const item = updatedInvoice.items.find(it => it.productId === p.id);
+          if (item) {
+            const newStock = Math.max(0, p.stock - item.quantity);
+            if (isSupabaseEnabled) {
+              syncUpsert('products', {
+                ...p,
+                stock: newStock
+              });
+            }
+            return { ...p, stock: newStock };
+          }
+          return p;
+        });
+      });
+
+      // Crear registros de ajuste de stock
+      const newStockLogs = updatedInvoice.items.map(item => ({
+        id: `adj-${Date.now()}-${item.productId}`,
+        productId: item.productId,
+        productName: item.productName,
+        type: 'Egreso' as const,
+        quantity: item.quantity,
+        reason: `Egreso automático por aprobación de Orden de Compra #${updatedInvoice.invoiceNumber}`,
+        createdAt: new Date().toISOString(),
+        user: 'Bodega Web'
+      }));
+      setAdjustments(prev => [...prev, ...newStockLogs]);
+      if (isSupabaseEnabled) {
+        for (const log of newStockLogs) {
+          syncUpsert('stock_adjustments', log);
+        }
+      }
+
+      // Si es crédito, actualizar el saldo deudor del cliente
+      if (updatedInvoice.paymentMethod === 'Crédito') {
+        setClients(prevClients => {
+          return prevClients.map(c => {
+            if (c.id === updatedInvoice.clientId) {
+              const newBalance = c.outstandingBalance + updatedInvoice.total;
+              if (isSupabaseEnabled) {
+                syncUpsert('clients', {
+                  ...c,
+                  outstandingBalance: newBalance
+                });
+              }
+              return { ...c, outstandingBalance: newBalance };
+            }
+            return c;
+          });
+        });
+      }
+    }
+
+    // 2. Si es pago al contado ('Pagado') y antes no lo estaba, registrar el cobro en la caja/turno del operador
+    const oldIsPaid = oldInvoice && oldInvoice.paymentStatus === 'Pagado';
+    const newIsPaid = updatedInvoice.paymentStatus === 'Pagado';
+    const isPayingOrderNow = !oldIsPaid && newIsPaid && updatedInvoice.paymentMethod !== 'Crédito';
+
+    if (isPayingOrderNow) {
+      setShifts(prevShifts => {
+        return prevShifts.map(s => {
+          if (s.status === 'Abierta') {
+            const isCash = updatedInvoice.paymentMethod === 'Efectivo';
+            const updatedShift = {
+              ...s,
+              salesCash: s.salesCash + (isCash ? updatedInvoice.total : 0),
+              salesCard: s.salesCard + (!isCash ? updatedInvoice.total : 0),
+              expectedCash: s.expectedCash + (isCash ? updatedInvoice.total : 0)
+            };
+            if (isSupabaseEnabled) syncUpsert('shifts', updatedShift);
+            return updatedShift;
+          }
+          return s;
+        });
+      });
+    }
+
     setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
     showToast(`Estado de la orden #${updatedInvoice.invoiceNumber} actualizado a: ${updatedInvoice.deliveryStatus || 'Listo'}`, "info");
     if (isSupabaseEnabled) syncUpsert('invoices', updatedInvoice);
@@ -2885,6 +2982,7 @@ export default function App() {
               invoices={invoices}
               config={config}
               onUpdateInvoice={handleUpdateInvoice}
+              products={products}
             />
           )}
 

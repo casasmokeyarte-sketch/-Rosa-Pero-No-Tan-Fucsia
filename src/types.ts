@@ -64,7 +64,7 @@ export interface Invoice {
   taxAmount: number;
   total: number;
   paymentMethod: string;
-  paymentStatus: 'Pagado' | 'Pendiente' | 'Vencido' | 'Anulada';
+  paymentStatus: 'Pagado' | 'Pendiente' | 'Vencido' | 'Anulada' | 'Orden de Compra';
   dueDate: string;
   createdAt: string;
   cashierName: string; // Cashier who issued it

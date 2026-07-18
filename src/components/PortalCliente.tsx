@@ -26,7 +26,10 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  Fingerprint
+  Fingerprint,
+  Printer,
+  FileText,
+  Calendar
 } from 'lucide-react';
 import AtomBubble from './AtomBubble';
 
@@ -76,6 +79,7 @@ export default function PortalCliente({
   
   // Navigation
   const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial'>('pedido');
+  const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
   // Sound and Alerter preferences state
   const [chatTone, setChatTone] = useState(client.chatSoundTone || 'Predeterminado');
@@ -450,8 +454,8 @@ export default function PortalCliente({
       taxRate: 0,
       taxAmount: 0,
       total: cartTotal,
-      paymentMethod: method,
-      paymentStatus: status,
+      paymentMethod: method === 'credit' ? 'Crédito' : 'Transferencia',
+      paymentStatus: 'Orden de Compra', // Always force 'Orden de Compra' for web pre-pedidos
       dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
       cashierName: 'Portal Online',
@@ -469,24 +473,24 @@ export default function PortalCliente({
 
     setCart([]);
     setCheckoutStep('cart');
-    setOrderSuccess(`¡SOLICITUD EXITOSA! Tu orden #${orderNum} ha sido ingresada al despacho en cola.`);
+    setOrderSuccess(`¡SOLICITUD EXITOSA! Tu orden de compra #${orderNum} ha sido registrada y está en espera de revisión.`);
     
     // Add auto message to chat about order
     setTimeout(() => {
       onSendMessage(
         client.id,
-        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu Pedido Online #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP. Modalidad: ${
+        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu pre-pedido (Orden de Compra) #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP. Modalidad: ${
           deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
-        }. Pago: ${method}. Un despachador de Rosa Fuerte está preparando la carga.`,
+        }. Pago solicitado: ${method === 'credit' ? 'Crédito' : 'Transferencia Bancaria / Bold'}. Un asesor revisará tu orden y existencias en inventario. Te notificaremos cuando sea aprobada para proceder al pago.`,
         'agent',
         'Asistente Digital'
       );
     }, 1500);
 
-    // Switch view to tracking
+    // Switch view to history
     setTimeout(() => {
       setOrderSuccess(null);
-      setActiveTab('trayectoria');
+      setActiveTab('historial');
     }, 4500);
   };
 
@@ -849,6 +853,18 @@ export default function PortalCliente({
                   {clientRequests.filter(r => r.status === 'Resuelto').length}
                 </span>
               )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('historial')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                activeTab === 'historial'
+                  ? 'bg-cyber-blue/20 text-cyber-blue border border-cyber-blue/30 shadow-md'
+                  : 'text-gray-400 hover:text-white hover:bg-slate-900/50 border border-transparent'
+              }`}
+            >
+              <Clock size={15} />
+              <span>MI HISTORIAL / ÓRDENES</span>
             </button>
 
             <button
@@ -1967,6 +1983,138 @@ export default function PortalCliente({
             </div>
           )}
 
+          {/* CLIENT INVOICE/TRANSACTION HISTORY TAB */}
+          {activeTab === 'historial' && (
+            <div className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-6">
+              <div className="border-b border-cyber-border pb-3">
+                <h2 className="text-base font-bold font-mono text-white tracking-wider flex items-center gap-2">
+                  <Clock size={16} className="text-cyber-blue" />
+                  AUDITORÍA DE COMPRAS Y HISTORIAL
+                </h2>
+                <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+                  Historial consolidado de tus pre-pedidos y compras procesadas. Aquí puedes ver los estados de aprobación, facturas finales y realizar tus pagos.
+                </p>
+              </div>
+
+              {/* Historial Table */}
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table className="w-full text-left border-collapse text-xs font-mono">
+                  <thead>
+                    <tr className="border-b border-cyber-border text-gray-500 uppercase text-[9px] font-bold">
+                      <th className="py-3 px-2">Pedido / Fecha</th>
+                      <th className="py-3 px-2">Insumos</th>
+                      <th className="py-3 px-2">Tipo / Canal</th>
+                      <th className="py-3 px-2 text-right">Total</th>
+                      <th className="py-3 px-2 text-center">Estado</th>
+                      <th className="py-3 px-2 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40 text-gray-300">
+                    {invoices
+                      .filter(inv => inv.clientId === client.id)
+                      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .map(inv => {
+                        let statusText = '';
+                        let statusColor = '';
+                        let detailBlock = null;
+
+                        if (inv.paymentStatus === 'Orden de Compra') {
+                          statusText = 'Pre-pedido (En Revisión)';
+                          statusColor = 'text-amber-400 bg-amber-400/10 border border-amber-400/20';
+                          detailBlock = (
+                            <div className="text-[10px] text-gray-400 bg-slate-950/60 p-2.5 rounded mt-2 border border-slate-900 leading-normal">
+                              ⌛ Tu pedido está siendo verificado por un asesor para confirmar el stock físico en la bodega. Te notificaremos cuando se apruebe.
+                            </div>
+                          );
+                        } else if (inv.paymentStatus === 'Pendiente') {
+                          statusText = 'Aprobado - Pendiente de Pago';
+                          statusColor = 'text-cyber-orange bg-cyber-orange/10 border border-cyber-orange/20 animate-pulse';
+                          detailBlock = (
+                            <div className="text-[10px] text-gray-300 bg-cyber-orange/5 p-3.5 rounded-lg mt-2 border border-cyber-orange/20 space-y-2 leading-relaxed">
+                              <p className="font-bold text-white uppercase text-[10px] tracking-wide flex items-center gap-1.5">
+                                💳 INSTRUCCIONES DE PAGO HABILITADAS:
+                              </p>
+                              <p>El asesor ha verificado la disponibilidad y aprobado tu orden. Realiza la transferencia del total exacto a cualquiera de los siguientes medios:</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9px] pt-1">
+                                <div className="bg-slate-950/80 p-2 rounded border border-slate-900">
+                                  <strong>Bancolombia (Ahorros):</strong><br/>
+                                  Nº 225-0000-2534<br/>
+                                  Titular: Oliver Torres
+                                </div>
+                                <div className="bg-slate-950/80 p-2 rounded border border-slate-900">
+                                  <strong>Daviplata:</strong><br/>
+                                  Nº 302 278 49 38<br/>
+                                  Titular: Oliver Torres
+                                </div>
+                                <div className="bg-slate-950/80 p-2 rounded border border-slate-900 sm:col-span-2">
+                                  <strong>Bre-B (Transferencias Inmediatas):</strong> 3022784938 / @OLIVER915<br/>
+                                  <strong>PayPal / Tarjetas / Enlaces:</strong> Visa, MasterCard, Amex, Codensa
+                                </div>
+                              </div>
+                              <p className="font-bold text-cyber-orange text-[9px] uppercase tracking-wider pt-1">
+                                ⚠️ IMPORTANTE: Por favor, envía una captura del comprobante por la pestaña de "Chat con Operadores" para confirmar tu pago y proceder con el despacho.
+                              </p>
+                            </div>
+                          );
+                        } else if (inv.paymentStatus === 'Pagado') {
+                          statusText = 'Pagado - En Despacho';
+                          statusColor = 'text-cyber-green bg-cyber-green/10 border border-cyber-green/20';
+                        } else if (inv.paymentStatus === 'Anulada') {
+                          statusText = 'Anulada';
+                          statusColor = 'text-red-400 bg-red-400/10 border border-red-400/20';
+                        } else {
+                          statusText = inv.paymentStatus;
+                          statusColor = 'text-gray-400 bg-gray-400/10 border border-gray-400/20';
+                        }
+
+                        return (
+                          <tr key={inv.id} className="hover:bg-slate-900/30 text-gray-300">
+                            <td className="py-3 px-2">
+                              <div className="font-bold text-white">{inv.invoiceNumber}</div>
+                              <div className="text-[9px] text-gray-500 mt-0.5">{new Date(inv.createdAt).toLocaleDateString()}</div>
+                            </td>
+                            <td className="py-3 px-2 max-w-xs">
+                              <div className="truncate text-gray-400">
+                                {inv.items.map(it => `${it.productName} (x${it.quantity})`).join(', ')}
+                              </div>
+                              {detailBlock}
+                            </td>
+                            <td className="py-3 px-2 text-gray-400 uppercase text-[10px]">
+                              {inv.cashierName === 'Portal Online' ? '🛍️ Portal Web' : '🏪 Venta Directa'}
+                            </td>
+                            <td className="py-3 px-2 text-right font-bold text-white">
+                              ${inv.total.toLocaleString('es-CO')}
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <span className={`inline-block text-[8px] font-bold px-2 py-0.5 rounded ${statusColor}`}>
+                                {statusText}
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 text-right">
+                              <button
+                                onClick={() => setSelectedInvoiceForPrint(inv)}
+                                className="bg-slate-900 hover:bg-slate-800 text-gray-300 p-1.5 rounded border border-slate-800 cursor-pointer inline-flex items-center gap-1.5 transition-all text-[9px] border-none"
+                                title="Imprimir PDF Recibo"
+                              >
+                                <Printer size={11} /> Imprimir
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    {invoices.filter(inv => inv.clientId === client.id).length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-gray-500 text-xs">
+                          No tienes pre-pedidos ni compras registradas en este momento.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>
@@ -2312,6 +2460,114 @@ export default function PortalCliente({
               </div>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* PRINT OVERLAY MODAL */}
+      {selectedInvoiceForPrint && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+          <div className="bg-white text-black p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black">
+            {/* Header */}
+            <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
+              <h3 className="text-sm font-extrabold uppercase">ORDEN DE COMPRA / COMPROBANTE</h3>
+              <p className="text-[10px] font-bold">ROSA FUERTE LOGÍSTICA</p>
+              <p className="text-[9px]">Suministros Rosa Pero No Tan Fucsia</p>
+            </div>
+            
+            {/* Core Info */}
+            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1.5 font-bold">
+              <div className="flex justify-between font-bold">
+                <span>REMITO / COMPRA:</span>
+                <span>{selectedInvoiceForPrint.invoiceNumber}</span>
+              </div>
+              <div className="flex justify-between font-normal">
+                <span>FECHA REGISTRO:</span>
+                <span>{new Date(selectedInvoiceForPrint.createdAt).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>MODALIDAD ENVÍO:</span>
+                <span className="text-red-600">
+                  {selectedInvoiceForPrint.deliveryMethod === 'recoge' ? 'Retira en persona' : 'Envío programado'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>PAGO SOLICITADO:</span>
+                <span>{selectedInvoiceForPrint.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between font-extrabold">
+                <span>ESTADO COMPRA:</span>
+                <span className="text-amber-700 font-bold">
+                  {selectedInvoiceForPrint.paymentStatus === 'Orden de Compra' ? 'ORDEN DE COMPRA (PRE-PEDIDO)' :
+                   selectedInvoiceForPrint.paymentStatus === 'Pendiente' ? 'APROBADA - PENDIENTE DE PAGO' :
+                   selectedInvoiceForPrint.paymentStatus.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {/* Client Info */}
+            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
+              <div className="font-bold">CLIENTE:</div>
+              <div className="uppercase font-bold">{selectedInvoiceForPrint.clientName}</div>
+              <div>RUT/NIT: {selectedInvoiceForPrint.clientRut}</div>
+              <div className="bg-slate-100 p-1.5 rounded mt-1 font-sans text-[9px] leading-relaxed">
+                📍 <strong>Dirección de entrega:</strong> {selectedInvoiceForPrint.guideAddress || 'Dirección Registrada'}
+              </div>
+            </div>
+
+            {/* Items Summary */}
+            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
+              <div className="font-bold">INSUMOS ADQUIRIDOS:</div>
+              <div className="space-y-1 border-t border-dashed border-black/20 pt-1.5 mt-1">
+                {selectedInvoiceForPrint.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between font-bold">
+                    <span>{it.productName} (x{it.quantity})</span>
+                    <span>${it.total.toLocaleString('es-CO')}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between border-t border-dashed border-black pt-1.5 mt-2 text-sm font-bold">
+                <span>TOTAL LIQUIDADO:</span>
+                <span>${selectedInvoiceForPrint.total.toLocaleString('es-CO')} COP</span>
+              </div>
+            </div>
+
+            {/* Cuentas bancarias */}
+            {selectedInvoiceForPrint.paymentStatus === 'Pendiente' && (
+              <div className="py-3 border-b border-dashed border-black text-[9px] space-y-1 bg-slate-50 p-2 rounded">
+                <div className="font-bold text-center">CUENTAS HABILITADAS PARA TRANSFERENCIA:</div>
+                <ul className="list-disc pl-3 space-y-1">
+                  <li><strong>Bancolombia (Ahorros):</strong> 22500002534 (Oliver Torres)</li>
+                  <li><strong>Daviplata:</strong> 302 278 49 38 (Oliver Torres)</li>
+                  <li><strong>Bre-B:</strong> 3022784938 / @OLIVER915</li>
+                  <li><strong>PayPal / Tarjetas / Otros:</strong> Visa, MasterCard, Amex, Codensa</li>
+                </ul>
+              </div>
+            )}
+
+            {/* Signature Area */}
+            <div className="py-4 text-center space-y-1">
+              <div className="pt-8 border-b border-black w-2/3 mx-auto"></div>
+              <p className="text-[8px] uppercase tracking-wider text-gray-600">Soporte y Operaciones Rosa Fuerte</p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 mt-4 border-t border-slate-300 pt-4 no-print font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex-1 bg-black text-white hover:bg-slate-900 p-2 rounded-lg font-bold flex items-center justify-center gap-1.5 cursor-pointer border-none"
+              >
+                Imprimir
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedInvoiceForPrint(null)}
+                className="flex-1 bg-red-600 text-white hover:bg-red-700 p-2 rounded-lg font-bold flex items-center justify-center cursor-pointer border-none"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
