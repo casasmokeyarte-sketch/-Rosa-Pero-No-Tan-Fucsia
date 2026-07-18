@@ -154,5 +154,7 @@ ALTER TABLE clients
 ADD COLUMN IF NOT EXISTS has_credit boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS is_employee boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS special_discount_percentage numeric(5,2) DEFAULT 0,
-ADD COLUMN IF NOT EXISTS discounted_product_ids jsonb DEFAULT '[]';
+ADD COLUMN IF NOT EXISTS discounted_product_ids jsonb DEFAULT '[]',
+ADD COLUMN IF NOT EXISTS credit_terms_days integer DEFAULT 30,
+ADD COLUMN IF NOT EXISTS credit_conditions text DEFAULT '';
     
