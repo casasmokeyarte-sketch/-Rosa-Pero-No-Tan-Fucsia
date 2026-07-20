@@ -1329,7 +1329,11 @@ export default function Configuraciones({
                           {u.username !== currentUser.username ? (
                             <button
                               type="button"
-                              onClick={() => onDeleteUser(u.id)}
+                              onClick={() => {
+                                if (window.confirm(`¿Está seguro de eliminar y revocar el acceso al operario/agente '${u.fullName}' (@${u.username})?`)) {
+                                  onDeleteUser(u.id);
+                                }
+                              }}
                               className="text-gray-500 hover:text-red-400 p-1.5 bg-slate-900/50 hover:bg-slate-900 rounded border border-slate-900 hover:border-red-500/30 transition-all cursor-pointer"
                               title="Revocar Licencia de Acceso"
                             >

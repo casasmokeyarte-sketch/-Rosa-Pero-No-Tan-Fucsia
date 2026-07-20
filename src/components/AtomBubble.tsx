@@ -519,7 +519,12 @@ export default function AtomBubble({
                   return (
                     <div 
                       key={c.id}
-                      onClick={() => setActiveChatClientId(c.id)}
+                      onClick={() => {
+                        setActiveChatClientId(c.id);
+                        if (!c.assignedAgentId && currentUser && onAssignAgent) {
+                          onAssignAgent(c.id, currentUser.id, currentUser.fullName);
+                        }
+                      }}
                       className="p-3 hover:bg-slate-900/60 transition-all cursor-pointer flex items-center justify-between gap-3 text-left"
                     >
                       <div className="min-w-0 flex-1">
@@ -583,7 +588,11 @@ export default function AtomBubble({
                   <div>
                     {!activeClient.assignedAgentId ? (
                       <button
-                        onClick={handleTakeChat}
+                        onClick={() => {
+                          if (activeClient && currentUser && onAssignAgent) {
+                            onAssignAgent(activeClient.id, currentUser.id, currentUser.fullName);
+                          }
+                        }}
                         className="bg-cyber-pink hover:bg-cyber-accent text-black font-extrabold px-2 py-0.5 rounded transition-all cursor-pointer shadow-sm text-[8px]"
                       >
                         🙋‍♂️ TOMAR CHAT
@@ -627,7 +636,7 @@ export default function AtomBubble({
                         className={`flex flex-col max-w-[85%] ${isMyMsg ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
                         <span className="text-[8px] text-gray-500 font-mono mb-0.5">
-                          {msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {msg.senderName} • {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         
                         <div className={`p-2.5 rounded-xl text-xs font-mono leading-relaxed border ${

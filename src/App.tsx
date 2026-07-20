@@ -415,6 +415,10 @@ export default function App() {
 
   useEffect(() => { safeSetItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
 
+  useEffect(() => { safeSetItem('extreme_users', JSON.stringify(users)); }, [users]);
+
+  useEffect(() => { safeSetItem('extreme_clients', JSON.stringify(clients)); }, [clients]);
+
   useEffect(() => { safeSetItem('extreme_flash_messages', JSON.stringify(flashMessages)); }, [flashMessages]);
 
   useEffect(() => { safeSetItem('extreme_flash_views', JSON.stringify(flashViews)); }, [flashViews]);
@@ -1304,11 +1308,19 @@ export default function App() {
 
         const dbClients = await fetchTable('clients');
         if (dbClients && dbClients.length > 0) {
-          const sortedNew = [...dbClients].sort((a, b) => a.id.localeCompare(b.id));
           setClients(prev => {
+            const merged = dbClients.map(dbC => {
+              const existing = prev.find(p => p.id === dbC.id);
+              return {
+                ...dbC,
+                assignedAgentId: dbC.assignedAgentId || existing?.assignedAgentId,
+                assignedAgentName: dbC.assignedAgentName || existing?.assignedAgentName
+              };
+            });
+            const sortedNew = [...merged].sort((a, b) => a.id.localeCompare(b.id));
             const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
             if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return dbClients;
+              return sortedNew;
             }
             return prev;
           });
@@ -1500,12 +1512,14 @@ export default function App() {
     setShifts(prevShifts => {
       return prevShifts.map(s => {
         if (s.status === 'Abierta') {
+          const isCash = newInvoice.paymentMethod === 'Efectivo';
+          const isCredit = newInvoice.paymentMethod === 'Crédito';
           return {
             ...s,
-            salesCash: s.salesCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0),
-            salesCard: s.salesCard + (newInvoice.paymentMethod === 'Tarjeta' ? newInvoice.total : 0),
-            salesCredit: s.salesCredit + (newInvoice.paymentMethod === 'Crédito' ? newInvoice.total : 0),
-            expectedCash: s.expectedCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0)
+            salesCash: s.salesCash + (isCash ? newInvoice.total : 0),
+            salesCard: s.salesCard + (!isCash && !isCredit ? newInvoice.total : 0),
+            salesCredit: s.salesCredit + (isCredit ? newInvoice.total : 0),
+            expectedCash: s.expectedCash + (isCash ? newInvoice.total : 0)
           };
         }
         return s;
@@ -2747,63 +2761,143 @@ export default function App() {
 
           {/* Notification Bell */}
           <div className="relative">
-            <button
-              onClick={() => setShowNotifDropdown(!showNotifDropdown)}
-              className="relative flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-1.5 sm:p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all text-xs sm:text-sm"
-              title="Notificaciones de Compras Web"
-            >
-              <span className="text-xs sm:text-sm">🔔</span>
-              {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-[#E82E3E] text-white text-[8px] font-black w-4 sm:w-4.5 h-4 sm:h-4.5 rounded-full flex items-center justify-center animate-bounce shadow-md">
-                  {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length}
-                </span>
-              )}
-            </button>
-            {showNotifDropdown && (
-              <div className="absolute right-0 mt-2 w-72 bg-cyber-card border border-cyber-border rounded-xl shadow-2xl z-50 p-2 space-y-1.5 max-h-80 overflow-y-auto backdrop-blur-md">
-                <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-slate-800 pb-1.5 mb-1.5 px-2 flex justify-between items-center">
-                  <span>Alertas de Compras Web</span>
-                  <span className="text-cyber-pink bg-cyber-pink/10 px-1.5 rounded-full font-mono">
-                    {invoices.filter(inv => inv.cashierName === 'Portal Online' && inv.deliveryStatus === 'Pendiente').length} Nuevas
-                  </span>
-                </div>
-                {invoices.filter(inv => inv.cashierName === 'Portal Online').slice(0, 10).map(inv => (
+            {(() => {
+              const pendingWebInvoices = invoices.filter(inv => 
+                (inv.cashierName === 'Portal Online' || inv.invoiceNumber.startsWith('WEB-')) && 
+                (inv.paymentStatus === 'Orden de Compra' || inv.deliveryStatus === 'Pendiente')
+              );
+              const clientMsgs = chatMessages.filter(msg => {
+                if (msg.sender !== 'client') return false;
+                const clientObj = clients.find(c => c.id === msg.clientId);
+                return !clientObj || !clientObj.assignedAgentId;
+              }).slice(-5).reverse();
+              const totalAlerts = pendingWebInvoices.length + clientMsgs.length;
+
+              return (
+                <>
                   <button
-                    key={inv.id}
-                    onClick={() => {
-                      setActiveTab('compras_web');
-                      setShowNotifDropdown(false);
-                    }}
-                    className={`w-full text-left p-2 rounded-lg text-[10px] font-mono border transition-all hover:bg-slate-900/50 flex flex-col gap-0.5 ${
-                      inv.deliveryStatus === 'Pendiente'
-                        ? 'border-cyber-pink/40 bg-cyber-pink/5 text-white'
-                        : 'border-slate-800 text-gray-400'
+                    onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+                    className={`relative flex items-center justify-center p-1.5 sm:p-2 rounded-lg border transition-all text-xs sm:text-sm cursor-pointer ${
+                      totalAlerts > 0 
+                        ? 'bg-cyber-pink/20 text-cyber-pink border-cyber-pink animate-pulse shadow-lg shadow-cyber-pink/20' 
+                        : 'bg-slate-900 text-gray-400 hover:text-white border-cyber-border hover:border-cyber-pink/50'
                     }`}
+                    title="Centro de Alertas y Notificaciones"
                   >
-                    <div className="flex justify-between items-center">
-                      <span className="font-extrabold text-cyber-pink">{inv.invoiceNumber}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                        inv.paymentStatus === 'Pagado' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-400/10 text-amber-400 border border-amber-400/20'
-                      }`}>
-                        {inv.paymentMethod}
+                    <span className="text-xs sm:text-sm">🔔</span>
+                    {totalAlerts > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 bg-[#E82E3E] text-white text-[8px] font-black w-4 sm:w-4.5 h-4 sm:h-4.5 rounded-full flex items-center justify-center animate-bounce shadow-md border border-white/20">
+                        {totalAlerts}
                       </span>
-                    </div>
-                    <div className="truncate font-sans font-medium text-gray-200">
-                      Cliente: {inv.clientName}
-                    </div>
-                    <div className="flex justify-between text-[8px] text-gray-500 mt-0.5">
-                      <span>{new Date(inv.createdAt).toLocaleTimeString()}</span>
-                      <span className="uppercase text-cyber-orange">{inv.deliveryStatus === 'Pendiente' ? 'Por Empacar' : inv.deliveryStatus}</span>
-                    </div>
+                    )}
                   </button>
-                ))}
-                {invoices.filter(inv => inv.cashierName === 'Portal Online').length === 0 && (
-                  <div className="py-6 text-center text-gray-600 text-[10px] italic">
-                    Sin notificaciones de compras
-                  </div>
-                )}
-              </div>
-            )}
+                  
+                  {showNotifDropdown && (
+                    <div className="absolute right-0 mt-2 w-80 bg-cyber-card border border-cyber-border rounded-xl shadow-2xl z-50 p-2.5 space-y-2 max-h-96 overflow-y-auto backdrop-blur-md font-mono text-xs">
+                      
+                      {/* Header */}
+                      <div className="text-[10px] text-gray-300 font-bold uppercase tracking-wider border-b border-slate-800 pb-2 px-1 flex justify-between items-center">
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-cyber-pink animate-ping w-2 h-2 rounded-full bg-cyber-pink inline-block"></span>
+                          CENTRO DE ALERTAS EN VIVO
+                        </span>
+                        <span className="text-cyber-pink bg-cyber-pink/10 border border-cyber-pink/30 px-2 py-0.5 rounded-full">
+                          {totalAlerts} Activas
+                        </span>
+                      </div>
+
+                      {/* Web Purchases Section */}
+                      <div className="space-y-1">
+                        <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest px-1 pt-1 flex justify-between">
+                          <span>🛍️ Compras Web Pendientes ({pendingWebInvoices.length})</span>
+                          {pendingWebInvoices.length > 0 && (
+                            <button 
+                              onClick={() => { setActiveTab('compras_web'); setShowNotifDropdown(false); }}
+                              className="text-cyber-pink hover:underline text-[9px]"
+                            >
+                              Ver Todas →
+                            </button>
+                          )}
+                        </div>
+                        {pendingWebInvoices.slice(0, 5).map(inv => (
+                          <button
+                            key={inv.id}
+                            onClick={() => {
+                              setActiveTab('compras_web');
+                              setShowNotifDropdown(false);
+                            }}
+                            className="w-full text-left p-2 rounded-lg text-[10px] border border-cyber-pink/30 bg-cyber-pink/10 text-white hover:bg-cyber-pink/20 transition-all flex flex-col gap-0.5"
+                          >
+                            <div className="flex justify-between items-center font-bold">
+                              <span className="text-cyber-pink">{inv.invoiceNumber}</span>
+                              <span className="bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded text-[8px] border border-emerald-500/30">
+                                ${inv.total.toLocaleString('es-CO')} COP
+                              </span>
+                            </div>
+                            <div className="truncate font-sans font-medium text-gray-200">
+                              Cliente: {inv.clientName}
+                            </div>
+                            <div className="flex justify-between text-[8px] text-gray-400 mt-0.5">
+                              <span>{new Date(inv.createdAt).toLocaleDateString('es-CO')} {new Date(inv.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span className="uppercase font-bold text-cyber-orange">{inv.paymentStatus === 'Orden de Compra' ? 'Revisión Requerida' : 'Por Empacar'}</span>
+                            </div>
+                          </button>
+                        ))}
+                        {pendingWebInvoices.length === 0 && (
+                          <div className="py-2 text-center text-gray-500 text-[9px] italic bg-slate-900/40 rounded border border-slate-900">
+                            Sin compras web pendientes por procesar
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Client Chat Messages Section */}
+                      <div className="space-y-1 pt-1 border-t border-slate-800">
+                        <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest px-1 pt-1 flex justify-between">
+                          <span>💬 Mensajes Recientes de Clientes ({clientMsgs.length})</span>
+                          {clientMsgs.length > 0 && (
+                            <button 
+                              onClick={() => { setActiveTab('chatsoporte'); setShowNotifDropdown(false); }}
+                              className="text-cyan-400 hover:underline text-[9px]"
+                            >
+                              Abrir Chat →
+                            </button>
+                          )}
+                        </div>
+                        {clientMsgs.map(msg => {
+                          const clientObj = clients.find(c => c.id === msg.clientId);
+                          return (
+                            <button
+                              key={msg.id}
+                              onClick={() => {
+                                setActiveTab('chatsoporte');
+                                setShowNotifDropdown(false);
+                              }}
+                              className="w-full text-left p-2 rounded-lg text-[10px] border border-cyan-500/30 bg-cyan-500/10 text-white hover:bg-cyan-500/20 transition-all flex flex-col gap-0.5"
+                            >
+                              <div className="flex justify-between items-center font-bold text-cyan-300">
+                                <span>{msg.senderName || clientObj?.name || 'Cliente'}</span>
+                                <span className="text-[8px] text-gray-400 font-normal">
+                                  {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <p className="truncate text-[10px] text-gray-200 font-sans">
+                                "{msg.text}"
+                              </p>
+                            </button>
+                          );
+                        })}
+                        {clientMsgs.length === 0 && (
+                          <div className="py-2 text-center text-gray-500 text-[9px] italic bg-slate-900/40 rounded border border-slate-900">
+                            Sin mensajes recientes de clientes
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           {/* Fullscreen Toggle Button */}

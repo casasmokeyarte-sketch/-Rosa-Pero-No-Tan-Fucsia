@@ -438,7 +438,7 @@ export default function Clientes({
                   HISTORIAL DE TRANSACCIONES / COMPROBANTES
                 </h3>
                 
-                <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                <div className="overflow-x-auto max-h-48 overflow-y-auto">
                   <table className="w-full text-left border-collapse text-[11px] font-mono">
                     <thead>
                       <tr className="border-b border-cyber-border text-gray-500 uppercase text-[9px] font-bold">
@@ -453,9 +453,9 @@ export default function Clientes({
                       {getClientInvoices(selectedClient.id).map(inv => (
                         <tr key={inv.id} className="hover:bg-slate-900/50 text-gray-300">
                           <td className="py-2 font-bold text-white">{inv.invoiceNumber}</td>
-                          <td className="py-2">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                          <td className="py-2">{new Date(inv.createdAt).toLocaleDateString('es-CO')}</td>
                           <td className="py-2">{inv.paymentMethod}</td>
-                          <td className="py-2 text-right font-bold text-white">${inv.total.toFixed(2)}</td>
+                          <td className="py-2 text-right font-bold text-white">${inv.total.toLocaleString('es-CO')}</td>
                           <td className="py-2 text-right">
                             <span className={`inline-block text-[8px] font-bold px-1.5 py-0.5 rounded ${
                               inv.paymentStatus === 'Pagado' ? 'bg-cyber-green/10 text-cyber-green border border-cyber-green/10' :
@@ -469,8 +469,51 @@ export default function Clientes({
                       ))}
                       {getClientInvoices(selectedClient.id).length === 0 && (
                         <tr>
-                          <td colSpan={5} className="py-6 text-center text-gray-500 text-xs">
+                          <td colSpan={5} className="py-4 text-center text-gray-500 text-xs">
                             No hay compras despachadas a este remitente.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Purchased Products History Table */}
+              <div className="space-y-3 pt-2">
+                <h3 className="text-xs font-semibold text-cyber-pink uppercase tracking-wider font-mono flex items-center gap-1.5">
+                  <span>🛍️ HISTORIAL DE PRODUCTOS COMPRADOS</span>
+                </h3>
+                
+                <div className="overflow-x-auto max-h-48 overflow-y-auto bg-slate-950/60 rounded-lg border border-slate-800/80 p-2">
+                  <table className="w-full text-left border-collapse text-[10px] font-mono">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-gray-400 uppercase text-[8px] font-bold">
+                        <th className="py-1.5">Producto / Insumo</th>
+                        <th className="py-1.5 text-center">Cant</th>
+                        <th className="py-1.5 text-right">Precio Un</th>
+                        <th className="py-1.5 text-right font-bold">Total</th>
+                        <th className="py-1.5 text-right">Factura / Fecha</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-900">
+                      {getClientInvoices(selectedClient.id).flatMap(inv => 
+                        (inv.items || []).map((item, idx) => (
+                          <tr key={`${inv.id}-${item.productId}-${idx}`} className="hover:bg-slate-900/50 text-gray-300">
+                            <td className="py-1.5 font-bold text-white truncate max-w-[140px]">{item.productName}</td>
+                            <td className="py-1.5 text-center font-bold text-cyber-orange">{item.quantity}</td>
+                            <td className="py-1.5 text-right text-gray-400">${item.price.toLocaleString('es-CO')}</td>
+                            <td className="py-1.5 text-right font-bold text-emerald-400">${item.total.toLocaleString('es-CO')}</td>
+                            <td className="py-1.5 text-right text-gray-500 text-[8px]">
+                              {inv.invoiceNumber} • {new Date(inv.createdAt).toLocaleDateString('es-CO')}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                      {getClientInvoices(selectedClient.id).flatMap(i => i.items || []).length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="py-4 text-center text-gray-500 text-xs">
+                            No registra ítems comprados en el historial.
                           </td>
                         </tr>
                       )}

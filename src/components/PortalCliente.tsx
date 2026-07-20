@@ -430,7 +430,7 @@ export default function PortalCliente({
   };
 
   // Helper to submit the invoice and request to Bunker Portal
-  const submitInvoice = (method: string, status: 'Pagado' | 'Pendiente') => {
+  const submitInvoice = (method: string, status: 'Pagado' | 'Pendiente' | 'Orden de Compra') => {
     const invoiceItems: InvoiceItem[] = cart.map(item => ({
       productId: item.product.id,
       productName: item.product.name,
@@ -441,6 +441,7 @@ export default function PortalCliente({
     }));
 
     const orderNum = `WEB-${Math.floor(1000 + Math.random() * 9000)}`;
+    const finalPaymentMethod = method === 'credit' ? 'Crédito' : (method === 'Bold' ? 'Bold' : 'Transferencia');
 
     const newInvoice: Invoice = {
       id: `inv-client-${Date.now()}`,
@@ -454,8 +455,8 @@ export default function PortalCliente({
       taxRate: 0,
       taxAmount: 0,
       total: cartTotal,
-      paymentMethod: method === 'credit' ? 'Crédito' : 'Transferencia',
-      paymentStatus: 'Orden de Compra', // Always force 'Orden de Compra' for web pre-pedidos
+      paymentMethod: finalPaymentMethod,
+      paymentStatus: status,
       dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
       cashierName: 'Portal Online',
@@ -473,15 +474,18 @@ export default function PortalCliente({
 
     setCart([]);
     setCheckoutStep('cart');
-    setOrderSuccess(`¡SOLICITUD EXITOSA! Tu orden de compra #${orderNum} ha sido registrada y está en espera de revisión.`);
+    const msgText = status === 'Pagado' 
+      ? `¡COMPRA WEB EXITOSA! Tu orden de compra #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP ha sido procesada y pagada correctamente.`
+      : `¡SOLICITUD EXITOSA! Tu orden de compra #${orderNum} ha sido registrada y está en espera de revisión.`;
+    setOrderSuccess(msgText);
     
     // Add auto message to chat about order
     setTimeout(() => {
       onSendMessage(
         client.id,
-        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu pre-pedido (Orden de Compra) #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP. Modalidad: ${
+        `🚨 [NOTIFICACIÓN DEL SISTEMA]: Hemos recibido tu pedido online #${orderNum} por $${cartTotal.toLocaleString('es-CO')} COP. Estado: ${status}. Modalidad: ${
           deliveryMethod === 'recoge' ? 'Retiro en persona' : 'Envío programado'
-        }. Pago solicitado: ${method === 'credit' ? 'Crédito' : 'Transferencia Bancaria / Bold'}. Un asesor revisará tu orden y existencias en inventario. Te notificaremos cuando sea aprobada para proceder al pago.`,
+        }. Pago: ${finalPaymentMethod}. Un asesor preparará tu despacho.`,
         'agent',
         'Asistente Digital'
       );
@@ -1586,7 +1590,7 @@ export default function PortalCliente({
                         key={msg.id} 
                         className={`flex flex-col max-w-[80%] ${isMyMsg ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
-                        <span className="text-[9px] text-gray-500 font-mono mb-0.5">{msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[9px] text-gray-500 font-mono mb-0.5">{msg.senderName} • {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         <div className={`p-3 rounded-xl text-xs font-mono leading-relaxed ${
                           isMyMsg 
                             ? 'bg-cyber-pink/20 text-white border border-cyber-pink/30 rounded-tr-none' 

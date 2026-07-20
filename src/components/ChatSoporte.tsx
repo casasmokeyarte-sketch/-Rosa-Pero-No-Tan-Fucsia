@@ -400,7 +400,12 @@ export default function ChatSoporte({
               return (
                 <div
                   key={c.id}
-                  onClick={() => setSelectedClientId(c.id)}
+                  onClick={() => {
+                    setSelectedClientId(c.id);
+                    if (!c.assignedAgentId && currentUser && onAssignAgent) {
+                      onAssignAgent(c.id, currentUser.id, currentUser.fullName);
+                    }
+                  }}
                   className={`p-3.5 flex items-start gap-3 cursor-pointer transition-all ${
                     isSelected 
                       ? 'bg-cyber-pink/10 border-l-4 border-cyber-pink text-white' 
@@ -499,7 +504,7 @@ export default function ChatSoporte({
                         className={`flex flex-col max-w-[85%] ${isAgent ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
                         <span className="text-[9px] text-gray-500 font-mono mb-0.5">
-                          {msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {msg.senderName} • {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         
                         <div className={`p-3 rounded-xl text-xs font-mono leading-relaxed shadow-sm ${
