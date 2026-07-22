@@ -54,7 +54,13 @@ export default function HistorialCierres({
 
     return invoices.filter(inv => {
       const invDate = new Date(inv.createdAt);
-      return invDate >= start && invDate <= end && inv.cashierName === shiftUser;
+      const withinTime = invDate >= start && invDate <= end;
+      if (!withinTime) return false;
+      return (
+        inv.cashierName === shiftUser ||
+        inv.cashierName === 'Portal Online' ||
+        (inv.invoiceNumber && inv.invoiceNumber.startsWith('WEB-'))
+      );
     });
   };
 
@@ -440,14 +446,22 @@ export default function HistorialCierres({
                     </tr>
                   </thead>
                   <tbody>
-                    {getShiftInvoices(selectedShift.user, selectedShift.startTime, selectedShift.endTime).map(inv => (
-                      <tr key={inv.id}>
-                        <td className="py-0.5 font-bold">{inv.invoiceNumber}</td>
-                        <td className="py-0.5 truncate max-w-[100px]">{inv.clientName}</td>
-                        <td className="py-0.5">{inv.paymentMethod}</td>
-                        <td className="py-0.5 text-right font-bold">${inv.total.toFixed(2)}</td>
-                      </tr>
-                    ))}
+                    {getShiftInvoices(selectedShift.user, selectedShift.startTime, selectedShift.endTime).map(inv => {
+                      const isWeb = inv.cashierName === 'Portal Online' || inv.invoiceNumber.startsWith('WEB-');
+                      return (
+                        <tr key={inv.id}>
+                          <td className="py-0.5 font-bold">
+                            {inv.invoiceNumber}
+                            {isWeb && (
+                              <span className="text-[8px] bg-slate-100 text-slate-800 border border-slate-300 px-1 rounded ml-1 font-sans print:border-black print:bg-white">WEB</span>
+                            )}
+                          </td>
+                          <td className="py-0.5 truncate max-w-[100px]">{inv.clientName}</td>
+                          <td className="py-0.5">{inv.paymentMethod}</td>
+                          <td className="py-0.5 text-right font-bold">${inv.total.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
                     {getShiftInvoices(selectedShift.user, selectedShift.startTime, selectedShift.endTime).length === 0 && (
                       <tr>
                         <td colSpan={4} className="py-2 text-center text-gray-400">

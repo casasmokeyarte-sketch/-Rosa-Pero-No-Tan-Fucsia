@@ -469,8 +469,30 @@ export default function App() {
           console.error("Failed to display native notification:", err);
         }
       }
+
+      // Registrar ingreso en el turno de caja activo del operador
+      if (currentUser && (inv.paymentStatus === 'Pagado' || inv.paymentMethod === 'Crédito')) {
+        setShifts(prevShifts => {
+          return prevShifts.map(s => {
+            if (s.status === 'Abierta') {
+              const isCash = inv.paymentMethod === 'Efectivo';
+              const isCredit = inv.paymentMethod === 'Crédito';
+              const updatedShift = {
+                ...s,
+                salesCash: s.salesCash + (isCash ? inv.total : 0),
+                salesCard: s.salesCard + (!isCash && !isCredit ? inv.total : 0),
+                salesCredit: s.salesCredit + (isCredit ? inv.total : 0),
+                expectedCash: s.expectedCash + (isCash ? inv.total : 0)
+              };
+              if (isSupabaseEnabled) syncUpsert('shifts', updatedShift);
+              return updatedShift;
+            }
+            return s;
+          });
+        });
+      }
     }
-  }, [invoices, soundSettings]);
+  }, [invoices, soundSettings, currentUser, isSupabaseEnabled]);
 
   // Payroll CRUD Handlers
   const handleAddPayrollEntry = (entry: PayrollEntry) => {
@@ -1508,23 +1530,25 @@ export default function App() {
       });
     }
 
-    // D. Add records to active cash register shift
-    setShifts(prevShifts => {
-      return prevShifts.map(s => {
-        if (s.status === 'Abierta') {
-          const isCash = newInvoice.paymentMethod === 'Efectivo';
-          const isCredit = newInvoice.paymentMethod === 'Crédito';
-          return {
-            ...s,
-            salesCash: s.salesCash + (isCash ? newInvoice.total : 0),
-            salesCard: s.salesCard + (!isCash && !isCredit ? newInvoice.total : 0),
-            salesCredit: s.salesCredit + (isCredit ? newInvoice.total : 0),
-            expectedCash: s.expectedCash + (isCash ? newInvoice.total : 0)
-          };
-        }
-        return s;
+    // D. Add records to active cash register shift (only in operator session)
+    if (currentUser) {
+      setShifts(prevShifts => {
+        return prevShifts.map(s => {
+          if (s.status === 'Abierta') {
+            const isCash = newInvoice.paymentMethod === 'Efectivo';
+            const isCredit = newInvoice.paymentMethod === 'Crédito';
+            return {
+              ...s,
+              salesCash: s.salesCash + (isCash ? newInvoice.total : 0),
+              salesCard: s.salesCard + (!isCash && !isCredit ? newInvoice.total : 0),
+              salesCredit: s.salesCredit + (isCredit ? newInvoice.total : 0),
+              expectedCash: s.expectedCash + (isCash ? newInvoice.total : 0)
+            };
+          }
+          return s;
+        });
       });
-    });
+    }
 
     showToast(`Remisión/Factura #${newInvoice.invoiceNumber} guardada y despachada`, "success");
 
@@ -1565,15 +1589,19 @@ export default function App() {
           });
         }
       }
-      const activeShift = shifts.find(s => s.status === 'Abierta');
-      if (activeShift) {
-        syncUpsert('shifts', {
-          ...activeShift,
-          salesCash: activeShift.salesCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0),
-          salesCard: activeShift.salesCard + (newInvoice.paymentMethod === 'Tarjeta' ? newInvoice.total : 0),
-          salesCredit: activeShift.salesCredit + (newInvoice.paymentMethod === 'Crédito' ? newInvoice.total : 0),
-          expectedCash: activeShift.expectedCash + (newInvoice.paymentMethod === 'Efectivo' ? newInvoice.total : 0)
-        });
+      if (currentUser) {
+        const activeShift = shifts.find(s => s.status === 'Abierta');
+        if (activeShift) {
+          const isCash = newInvoice.paymentMethod === 'Efectivo';
+          const isCredit = newInvoice.paymentMethod === 'Crédito';
+          syncUpsert('shifts', {
+            ...activeShift,
+            salesCash: activeShift.salesCash + (isCash ? newInvoice.total : 0),
+            salesCard: activeShift.salesCard + (!isCash && !isCredit ? newInvoice.total : 0),
+            salesCredit: activeShift.salesCredit + (isCredit ? newInvoice.total : 0),
+            expectedCash: activeShift.expectedCash + (isCash ? newInvoice.total : 0)
+          });
+        }
       }
     }
   };
@@ -1666,8 +1694,108 @@ export default function App() {
       });
     }
 
+    // 3. Si se anula la factura ('Anulada') y antes no lo estaba
+    const oldIsVoided = oldInvoice && oldInvoice.paymentStatus === 'Anulada';
+    const newIsVoided = updatedInvoice.paymentStatus === 'Anulada';
+    const isVoidingNow = !oldIsVoided && newIsVoided;
+
+    if (isVoidingNow) {
+      // A. Devolver stock (re-incrementar)
+      setProducts(prevProducts => {
+        return prevProducts.map(p => {
+          const item = updatedInvoice.items.find(it => it.productId === p.id);
+          if (item) {
+            let newStock = p.stock;
+            let updatedUserStocks = p.userStocks || {};
+            if (updatedInvoice.cashierName === 'Portal Online') {
+              newStock = p.stock + item.quantity;
+            } else {
+              const cashierUser = users.find(u => u.fullName === updatedInvoice.cashierName);
+              const userId = cashierUser?.id || 'admin';
+              const userStock = updatedUserStocks[userId] !== undefined ? updatedUserStocks[userId] : 0;
+              updatedUserStocks = {
+                ...updatedUserStocks,
+                [userId]: userStock + item.quantity
+              };
+            }
+            const updatedProduct = {
+              ...p,
+              stock: newStock,
+              userStocks: updatedUserStocks
+            };
+            if (isSupabaseEnabled) syncUpsert('products', updatedProduct);
+            return updatedProduct;
+          }
+          return p;
+        });
+      });
+
+      // Crear registros de reingreso de stock
+      const newStockLogs = updatedInvoice.items.map(item => ({
+        id: `adj-${Date.now()}-${item.productId}`,
+        productId: item.productId,
+        productName: item.productName,
+        type: 'Ingreso' as const,
+        quantity: item.quantity,
+        reason: `Reingreso automático por anulación de factura #${updatedInvoice.invoiceNumber}`,
+        createdAt: new Date().toISOString(),
+        user: updatedInvoice.cashierName || 'Sistema'
+      }));
+      setAdjustments(prev => [...prev, ...newStockLogs]);
+      if (isSupabaseEnabled) {
+        for (const log of newStockLogs) {
+          syncUpsert('stock_adjustments', log);
+        }
+      }
+
+      // B. Si la factura estaba cobrada ('Pagado') y no era a crédito, restar del turno de caja activo
+      const wasPaid = oldInvoice && oldInvoice.paymentStatus === 'Pagado';
+      const wasNotCredit = oldInvoice && oldInvoice.paymentMethod !== 'Crédito';
+      if (wasPaid && wasNotCredit) {
+        setShifts(prevShifts => {
+          return prevShifts.map(s => {
+            if (s.status === 'Abierta') {
+              const isCash = updatedInvoice.paymentMethod === 'Efectivo';
+              const updatedShift = {
+                ...s,
+                salesCash: Math.max(0, s.salesCash - (isCash ? updatedInvoice.total : 0)),
+                salesCard: Math.max(0, s.salesCard - (!isCash ? updatedInvoice.total : 0)),
+                expectedCash: Math.max(0, s.expectedCash - (isCash ? updatedInvoice.total : 0))
+              };
+              if (isSupabaseEnabled) syncUpsert('shifts', updatedShift);
+              return updatedShift;
+            }
+            return s;
+          });
+        });
+      }
+
+      // C. Si era a crédito, descontar saldo deudor del cliente
+      if (updatedInvoice.paymentMethod === 'Crédito') {
+        setClients(prevClients => {
+          return prevClients.map(c => {
+            if (c.id === updatedInvoice.clientId) {
+              const newBalance = Math.max(0, c.outstandingBalance - updatedInvoice.total);
+              if (isSupabaseEnabled) {
+                syncUpsert('clients', {
+                  ...c,
+                  outstandingBalance: newBalance
+                });
+              }
+              return { ...c, outstandingBalance: newBalance };
+            }
+            return c;
+          });
+        });
+      }
+    }
+
     setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
-    showToast(`Estado de la orden #${updatedInvoice.invoiceNumber} actualizado a: ${updatedInvoice.deliveryStatus || 'Listo'}`, "info");
+    if (updatedInvoice.paymentStatus === 'Anulada') {
+      showToast(`Factura #${updatedInvoice.invoiceNumber} ANULADA con éxito y reversada del sistema`, "warning");
+    } else {
+      showToast(`Estado de la orden #${updatedInvoice.invoiceNumber} actualizado a: ${updatedInvoice.deliveryStatus || 'Listo'}`, "info");
+    }
     if (isSupabaseEnabled) syncUpsert('invoices', updatedInvoice);
   };
 
@@ -3223,10 +3351,7 @@ export default function App() {
               currentUserName={currentUser.fullName}
               canAnular={getUserPermissions(currentUser).eliminar_facturas !== false}
               canImprimir={getUserPermissions(currentUser).imprimir_facturas !== false}
-              onUpdateInvoice={inv => {
-                setInvoices(prev => prev.map(i => i.id === inv.id ? inv : i));
-                showToast(`Factura #${inv.invoiceNumber} actualizada`, inv.paymentStatus === 'Anulada' ? 'warning' : 'info');
-              }}
+              onUpdateInvoice={handleUpdateInvoice}
             />
           )}
 

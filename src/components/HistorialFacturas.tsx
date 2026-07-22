@@ -189,10 +189,21 @@ export default function HistorialFacturas({
                     No se encontraron facturas con los filtros aplicados.
                   </td>
                 </tr>
-              ) : filtered.map(inv => (
-                <tr key={inv.id}
-                  className={`hover:bg-slate-900/30 transition-colors ${inv.paymentStatus === 'Anulada' ? 'opacity-50' : ''}`}>
-                  <td className="px-4 py-3 font-bold text-cyber-pink whitespace-nowrap">{inv.invoiceNumber}</td>
+              ) : filtered.map(inv => {
+                const isWeb = inv.cashierName === 'Portal Online' || inv.invoiceNumber.startsWith('WEB-');
+                return (
+                  <tr key={inv.id}
+                    className={`hover:bg-slate-900/30 transition-colors ${inv.paymentStatus === 'Anulada' ? 'opacity-50' : ''}`}>
+                    <td className="px-4 py-3 font-bold text-cyber-pink whitespace-nowrap">
+                      <div className="flex flex-col">
+                        <span>{inv.invoiceNumber}</span>
+                        {isWeb && (
+                          <span className="text-[8px] bg-cyber-pink/20 text-cyber-pink px-1 py-0.5 rounded border border-cyber-pink/30 w-max mt-0.5 font-sans">
+                            COMPRA WEB
+                          </span>
+                        )}
+                      </div>
+                    </td>
                   <td className="px-4 py-3 max-w-[160px]">
                     <p className="text-white font-semibold truncate">{inv.clientName}</p>
                     <p className="text-[10px] text-gray-500">{inv.clientRut}</p>
@@ -235,7 +246,8 @@ export default function HistorialFacturas({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -295,7 +307,9 @@ export default function HistorialFacturas({
                     <p className="text-[9px] text-gray-500 uppercase font-bold">Factura</p>
                     <p className="text-gray-300 print:text-gray-700">Fecha: {new Date(viewInvoice.createdAt).toLocaleDateString('es-CO')}</p>
                     <p className="text-gray-300 print:text-gray-700">Vence: {viewInvoice.dueDate || 'Contado'}</p>
-                    <p className="text-gray-300 print:text-gray-700">Cajero: {viewInvoice.cashierName}</p>
+                    <p className="text-gray-300 print:text-gray-700">
+                      Cajero: {viewInvoice.cashierName === 'Portal Online' ? '🛍️ Portal Web (Online)' : viewInvoice.cashierName}
+                    </p>
                   </div>
                 </div>
 

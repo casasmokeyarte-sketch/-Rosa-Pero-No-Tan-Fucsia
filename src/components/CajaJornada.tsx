@@ -165,7 +165,13 @@ export default function CajaJornada({
 
     return invoices.filter(inv => {
       const invDate = new Date(inv.createdAt);
-      return invDate >= start && invDate <= end && inv.cashierName === shiftUser;
+      const withinTime = invDate >= start && invDate <= end;
+      if (!withinTime) return false;
+      return (
+        inv.cashierName === shiftUser ||
+        inv.cashierName === 'Portal Online' ||
+        (inv.invoiceNumber && inv.invoiceNumber.startsWith('WEB-'))
+      );
     });
   };
 
@@ -274,18 +280,26 @@ export default function CajaJornada({
                 </h3>
                 
                 <div className="bg-slate-950 rounded-xl border border-slate-900 max-h-48 overflow-y-auto divide-y divide-slate-900">
-                  {getShiftInvoices(activeShift.user, activeShift.startTime).map(inv => (
-                    <div key={inv.id} className="p-2.5 flex justify-between items-center text-[11px] font-mono">
-                      <div>
-                        <span className="font-bold text-white">{inv.invoiceNumber}</span>
-                        <span className="text-gray-500 text-[10px] ml-2">{inv.clientName}</span>
+                  {getShiftInvoices(activeShift.user, activeShift.startTime).map(inv => {
+                    const isWeb = inv.cashierName === 'Portal Online' || inv.invoiceNumber.startsWith('WEB-');
+                    return (
+                      <div key={inv.id} className="p-2.5 flex justify-between items-center text-[11px] font-mono">
+                        <div>
+                          <span className="font-bold text-white">
+                            {inv.invoiceNumber}
+                            {isWeb && (
+                              <span className="text-[8px] bg-cyber-pink/20 text-cyber-pink px-1 rounded ml-1 border border-cyber-pink/30 font-sans">WEB</span>
+                            )}
+                          </span>
+                          <span className="text-gray-500 text-[10px] ml-2">{inv.clientName}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-400">{inv.paymentMethod}</span>
+                          <span className="text-white font-bold">${inv.total.toFixed(2)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-gray-400">{inv.paymentMethod}</span>
-                        <span className="text-white font-bold">${inv.total.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {getShiftInvoices(activeShift.user, activeShift.startTime).length === 0 && (
                     <div className="p-6 text-center text-gray-500 font-mono text-[10px]">
                       Aún no se registran comprobantes bajo este operador.
