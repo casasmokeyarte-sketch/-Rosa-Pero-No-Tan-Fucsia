@@ -158,3 +158,10 @@ ADD COLUMN IF NOT EXISTS discounted_product_ids jsonb DEFAULT '[]',
 ADD COLUMN IF NOT EXISTS credit_terms_days integer DEFAULT 30,
 ADD COLUMN IF NOT EXISTS credit_conditions text DEFAULT '';
     
+
+-- ============================================================
+-- 10. Columnas faltantes en la tabla 'invoices' para evitar fallas en inserciones de compras web
+-- ============================================================
+ALTER TABLE invoices 
+ADD COLUMN IF NOT EXISTS guide_address text,
+ADD COLUMN IF NOT EXISTS card_fee numeric(12,2) DEFAULT 0;
