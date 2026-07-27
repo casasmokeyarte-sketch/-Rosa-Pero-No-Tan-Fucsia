@@ -657,7 +657,7 @@ export default function CajaJornada({
 
       {/* OVERLAY MODAL: DISPLAY SPECIFIC HISTORICAL SHIFT AUDIT SHEET */}
       {selectedAuditShift && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
           <div className="bg-white text-black p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl relative border-2 border-black print-card space-y-4">
             
             <div className="flex justify-between items-center border-b border-black pb-2 no-print">
@@ -829,7 +829,7 @@ export default function CajaJornada({
 
       {/* OVERLAY MODAL: DISPLAY SPECIFIC CLOSED SHIFT PRINT REPORT (THERMAL TICKET) */}
       {closedShiftReport && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
           <div className="bg-white text-black p-6 rounded-2xl max-w-sm w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card space-y-4">
             
             <div className="flex justify-between items-center border-b border-black pb-2 no-print">

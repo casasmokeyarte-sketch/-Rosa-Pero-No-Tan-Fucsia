@@ -29,7 +29,7 @@ import {
   INITIAL_ADJUSTMENTS 
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
-import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField } from './lib/sync';
+import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -83,7 +83,8 @@ import {
   Inbox,
   DollarSign,
   Fingerprint,
-  Percent
+  Percent,
+  RefreshCw
 } from 'lucide-react';
 
 export function getUserPermissions(user: User): UserPermissions {
@@ -147,6 +148,7 @@ function safeSetItem(key: string, value: string) {
 export default function App() {
   
   const [isLoadingDB, setIsLoadingDB] = useState<boolean>(isSupabaseEnabled);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   
   // State Initialization with lazy LocalStorage loading
   const [config, setConfig] = useState<BusinessConfig>(() => {
@@ -459,16 +461,7 @@ export default function App() {
       showToast(`🚨 ¡NUEVA ORDEN ONLINE! Recibido pedido ${inv.invoiceNumber} por $${inv.total.toLocaleString('es-CO')} COP.`, "warning");
       
       // Native system push notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification('Rosa Fuerte - Pedido Online', {
-            body: `🚨 ¡Nueva orden! Pedido ${inv.invoiceNumber} por $${inv.total.toLocaleString('es-CO')} COP.`,
-            icon: '/images/logo_cyberpunk_1783131526095.jpg'
-          });
-        } catch (err) {
-          console.error("Failed to display native notification:", err);
-        }
-      }
+      sendNativePushNotification('Rosa Fuerte - Pedido Online', `🚨 ¡Nueva orden! Pedido ${inv.invoiceNumber} por $${inv.total.toLocaleString('es-CO')} COP.`);
 
       // Registrar ingreso en el turno de caja activo del operador
       if (currentUser && (inv.paymentStatus === 'Pagado' || inv.paymentMethod === 'Crédito')) {
@@ -535,32 +528,14 @@ export default function App() {
         }
         
         // Native system push notification
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification(`Rosa Fuerte - Chat de ${msg.senderName || 'Cliente'}`, {
-              body: msg.text,
-              icon: '/images/logo_cyberpunk_1783131526095.jpg'
-            });
-          } catch (err) {
-            console.error("Failed to display native chat notification:", err);
-          }
-        }
+        sendNativePushNotification(`Rosa Fuerte - Chat de ${msg.senderName || 'Cliente'}`, msg.text || '🎙️ [Nota de voz] u otro archivo');
       } else if (msg.sender === 'agent' && currentClient) {
         // Incoming message for client
         const tone = currentClient.chatSoundTone || 'Predeterminado';
         playTone(tone as any);
         
         // Native system push notification for client
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification(`Rosa Fuerte - Soporte`, {
-              body: msg.text,
-              icon: '/images/logo_cyberpunk_1783131526095.jpg'
-            });
-          } catch (err) {
-            console.error("Failed to display native client chat notification:", err);
-          }
-        }
+        sendNativePushNotification(`Rosa Fuerte - Soporte`, msg.text || '🎙️ [Nota de voz] u otro archivo');
       }
     }
   }, [chatMessages, currentClient, soundSettings]);
@@ -585,6 +560,31 @@ export default function App() {
       incrementFlashView(flashToShow.id, currentUser.username);
     }
   }, [isAuthenticated, currentUser?.id, flashMessages]);
+
+  const sendNativePushNotification = (title: string, body: string) => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      const options = {
+        body,
+        icon: '/images/logo_cyberpunk_1783131526095.jpg',
+        badge: '/icon-192.png',
+        vibrate: [200, 100, 200]
+      };
+      
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+          registration.showNotification(title, options).catch(err => {
+            console.warn("SW notification failed, falling back to standard:", err);
+            new Notification(title, options);
+          });
+        }).catch(() => {
+          new Notification(title, options);
+        });
+      } else {
+        new Notification(title, options);
+      }
+    }
+  };
 
   const handleSendMessage = (
     clientId: string, 
@@ -612,14 +612,18 @@ export default function App() {
       if (c.id === clientId) {
         updatedClient = {
           ...c,
-          assignedAgentId: agentId,
-          assignedAgentName: agentName
+          assignedAgentId: agentId || undefined,
+          assignedAgentName: agentName || undefined
         };
         return updatedClient;
       }
       return c;
     }));
-    showToast(`Enlace de chat asignado a ${agentName}`, "success");
+    if (agentId) {
+      showToast(`Enlace de chat asignado a ${agentName}`, "success");
+    } else {
+      showToast(`Control de chat liberado (Cola general)`, "info");
+    }
     if (isSupabaseEnabled && updatedClient) {
       syncUpsert('clients', updatedClient);
     }
@@ -867,6 +871,103 @@ export default function App() {
       });
     } else {
       document.exitFullscreen();
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (!isSupabaseEnabled || isSyncing) return;
+    try {
+      setIsSyncing(true);
+      showToast("Sincronizando base de datos...", "info");
+      
+      const dbConfig = await fetchConfig();
+      if (dbConfig) setConfig(dbConfig);
+
+      const dbUsers = await fetchTable('users');
+      if (dbUsers && dbUsers.length > 0) setUsers(dbUsers);
+
+      const dbClients = await fetchTable('clients');
+      if (dbClients && dbClients.length > 0) {
+        // Detect and resolve duplicates dynamic
+        const usedCodes = new Set<string>();
+        const cleanedClients = dbClients.map(client => {
+          let code = client.code;
+          if (!code || !code.startsWith('CL-') || usedCodes.has(code)) {
+            let isUnique = false;
+            let newCode = '';
+            while (!isUnique) {
+              const randNum = Math.floor(1000 + Math.random() * 9000);
+              newCode = `CL-${randNum}`;
+              isUnique = !usedCodes.has(newCode) && !dbClients.some(c => c.code === newCode);
+            }
+            code = newCode;
+            syncUpsert('clients', { ...client, code });
+          }
+          usedCodes.add(code);
+          return { ...client, code };
+        });
+        setClients(cleanedClients);
+      }
+
+      const dbProducts = await fetchTable('products');
+      if (dbProducts && dbProducts.length > 0) setProducts(dbProducts);
+
+      const dbInvoices = await fetchTable('invoices');
+      if (dbInvoices && dbInvoices.length > 0) {
+        dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
+        setInvoices(prev => {
+          const merged = [...prev];
+          dbInvoices.forEach(dbInv => {
+            const exists = merged.some(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+            if (!exists) merged.push(dbInv);
+          });
+          return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+      }
+
+      const dbExpenses = await fetchTable('expenses');
+      if (dbExpenses && dbExpenses.length > 0) setExpenses(dbExpenses);
+
+      const dbShifts = await fetchTable('shifts');
+      if (dbShifts && dbShifts.length > 0) setShifts(dbShifts);
+
+      const dbAdjustments = await fetchTable('stock_adjustments');
+      if (dbAdjustments && dbAdjustments.length > 0) setAdjustments(dbAdjustments);
+
+      const dbTransfers = await fetchTable('stock_transfers');
+      if (dbTransfers && dbTransfers.length > 0) setTransfers(dbTransfers);
+
+      const dbChatMessages = await fetchTable('chat_messages');
+      if (dbChatMessages && dbChatMessages.length > 0) {
+        dbChatMessages.forEach(msg => knownChatIdsRef.current.add(msg.id));
+        setChatMessages(prev => {
+          const merged = [...prev];
+          dbChatMessages.forEach(dbMsg => {
+            const exists = merged.some(m => m.id === dbMsg.id);
+            if (!exists) merged.push(dbMsg);
+          });
+          return merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
+        });
+      }
+
+      const dbClientRequests = await fetchTable('client_requests');
+      if (dbClientRequests && dbClientRequests.length > 0) setClientRequests(dbClientRequests);
+
+      const dbDiscounts = await fetchTable('discounts');
+      if (dbDiscounts && dbDiscounts.length > 0) setDiscounts(dbDiscounts);
+
+      const dbFlashMessages = await fetchTable('flash_messages');
+      if (dbFlashMessages && dbFlashMessages.length > 0) setFlashMessages(dbFlashMessages);
+
+      const dbPayroll = await fetchTable('payroll_entries');
+      if (dbPayroll && dbPayroll.length > 0) setPayrollEntries(dbPayroll);
+
+      showToast("Base de datos sincronizada con éxito.", "success");
+    } catch (e) {
+      console.error("Error manual sync:", e);
+      showToast("Error al sincronizar con Supabase.", "error");
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1129,11 +1230,261 @@ export default function App() {
     };
 
     loadAllData();
+    // Register Service Worker for mobile/native PWA push notifications
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('Service Worker registered with scope:', reg.scope))
+          .catch(err => console.error('Service Worker registration failed:', err));
+      });
+      // Register immediately if already loaded
+      if (document.readyState === 'complete') {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('Service Worker registered (immediate):', reg.scope))
+          .catch(err => console.error('Service Worker registration failed (immediate):', err));
+      }
+    }
     // Request permission for native system push notifications
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(e => console.error("Notification permission request failed:", e));
     }
   }, []);
+
+  // Real-time synchronization (Supabase Realtime) to reflect inserts/updates/deletes instantly
+  useEffect(() => {
+    if (!isSupabaseEnabled || !supabase) return;
+
+    const handleRealtimePayload = async (payload: any) => {
+      console.log('Realtime change detected:', payload);
+      const { table, eventType, new: newRow, old: oldRow } = payload;
+      const toCamel = (row: any) => mapKeys(row, toCamelCase);
+
+      if (table === 'chat_messages') {
+        setChatMessages(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(m => m.id === mapped.id);
+            if (exists) return prev;
+            knownChatIdsRef.current.add(mapped.id);
+            return [...prev, mapped].sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(m => m.id === mapped.id ? mapped : m);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(m => m.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'client_requests') {
+        setClientRequests(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(r => r.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(r => r.id === mapped.id ? mapped : r);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(r => r.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'invoices') {
+        setInvoices(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(i => i.id === mapped.id || i.invoiceNumber === mapped.invoiceNumber);
+            if (exists) return prev;
+            knownInvoiceIdsRef.current.add(mapped.id);
+            return [...prev, mapped].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(i => i.id === mapped.id ? mapped : i);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(i => i.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'products') {
+        setProducts(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(p => p.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped].sort((a, b) => a.id.localeCompare(b.id));
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(p => p.id === mapped.id ? mapped : p);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(p => p.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'clients') {
+        setClients(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(c => c.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped].sort((a, b) => a.id.localeCompare(b.id));
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(c => c.id === mapped.id ? {
+              ...mapped,
+              assignedAgentId: mapped.assignedAgentId || c.assignedAgentId,
+              assignedAgentName: mapped.assignedAgentName || c.assignedAgentName
+            } : c);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(c => c.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'shifts') {
+        setShifts(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(s => s.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped].sort((a, b) => a.id.localeCompare(b.id));
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(s => s.id === mapped.id ? mapped : s);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(s => s.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'expenses') {
+        setExpenses(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(e => e.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(e => e.id === mapped.id ? mapped : e);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(e => e.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'stock_adjustments') {
+        setAdjustments(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(a => a.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(a => a.id === mapped.id ? mapped : a);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(a => a.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'stock_transfers') {
+        setTransfers(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(t => t.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(t => t.id === mapped.id ? mapped : t);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(t => t.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'discounts') {
+        setDiscounts(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(d => d.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(d => d.id === mapped.id ? mapped : d);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(d => d.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'flash_messages') {
+        setFlashMessages(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(f => f.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(f => f.id === mapped.id ? mapped : f);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(f => f.id !== oldRow.id);
+          }
+          return prev;
+        });
+      } else if (table === 'payroll_entries') {
+        setPayrollEntries(prev => {
+          if (eventType === 'INSERT') {
+            const mapped = toCamel(newRow);
+            const exists = prev.some(p => p.id === mapped.id);
+            if (exists) return prev;
+            return [...prev, mapped];
+          }
+          if (eventType === 'UPDATE') {
+            const mapped = toCamel(newRow);
+            return prev.map(p => p.id === mapped.id ? mapped : p);
+          }
+          if (eventType === 'DELETE') {
+            return prev.filter(p => p.id !== oldRow.id);
+          }
+          return prev;
+        });
+      }
+    };
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        handleRealtimePayload
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isSupabaseEnabled]);
 
   // Handle Bold payment redirect callback at root level (on mount)
   useEffect(() => {
@@ -1163,7 +1514,8 @@ export default function App() {
               price: item.product.price,
               quantity: item.quantity,
               taxAmount: 0,
-              total: item.product.price * item.quantity
+              total: item.product.price * item.quantity,
+              note: item.note
             }));
             
             const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
@@ -1244,34 +1596,57 @@ export default function App() {
     }
   }, [isSupabaseEnabled, config, invoices, clients, products, shifts]);
 
-  // Real-time synchronization (polling) for Supabase databases (chat, requests, invoices, products, shifts)
+  // Real-time synchronization (polling) for Supabase databases with adaptive intervals to save bandwidth (egress)
   useEffect(() => {
     if (!isSupabaseEnabled) return;
 
-    // Fast poll for chat messages and client requests (every 4 seconds)
+    let isTabVisible = document.visibilityState === 'visible';
+    let lastActivityTime = Date.now();
+
+    // Event listeners to track activity
+    const handleActivity = () => {
+      lastActivityTime = Date.now();
+    };
+
+    const handleVisibilityChange = () => {
+      isTabVisible = document.visibilityState === 'visible';
+      if (isTabVisible) {
+        lastActivityTime = Date.now(); // reset activity time on show
+      }
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('click', handleActivity);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Fast poll for chat messages and client requests
     const pollFastData = async () => {
       try {
-        const dbChatMessages = await fetchTable('chat_messages');
-        if (dbChatMessages && dbChatMessages.length > 0) {
-          setChatMessages(prev => {
-            const merged = [...prev];
-            dbChatMessages.forEach(dbMsg => {
-              const idx = merged.findIndex(m => m.id === dbMsg.id);
-              if (idx >= 0) {
-                merged[idx] = dbMsg;
-              } else {
-                merged.push(dbMsg);
+        // Only fetch chat messages if the operator is on the support chat tab
+        if (activeTab === 'chatsoporte') {
+          const dbChatMessages = await fetchTable('chat_messages');
+          if (dbChatMessages && dbChatMessages.length > 0) {
+            setChatMessages(prev => {
+              const merged = [...prev];
+              dbChatMessages.forEach(dbMsg => {
+                const idx = merged.findIndex(m => m.id === dbMsg.id);
+                if (idx >= 0) {
+                  merged[idx] = dbMsg;
+                } else {
+                  merged.push(dbMsg);
+                }
+              });
+              const sortedMerged = merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
+              
+              const idsPrev = prev.map(m => m.id).join(',');
+              const idsMerged = sortedMerged.map(m => m.id).join(',');
+              if (idsPrev !== idsMerged || prev.length !== sortedMerged.length) {
+                return sortedMerged;
               }
+              return prev;
             });
-            const sortedMerged = merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
-            
-            const idsPrev = prev.map(m => m.id).join(',');
-            const idsMerged = sortedMerged.map(m => m.id).join(',');
-            if (idsPrev !== idsMerged || prev.length !== sortedMerged.length) {
-              return sortedMerged;
-            }
-            return prev;
-          });
+          }
         }
 
         const dbClientRequests = await fetchTable('client_requests');
@@ -1290,7 +1665,7 @@ export default function App() {
       }
     };
 
-    // Slow poll for other transactional tables (every 10 seconds)
+    // Slow poll for other transactional tables (invoices, products, clients, shifts)
     const pollSlowData = async () => {
       try {
         const dbInvoices = await fetchTable('invoices');
@@ -1364,14 +1739,45 @@ export default function App() {
       }
     };
 
-    const fastInterval = setInterval(pollFastData, 4000);
-    const slowInterval = setInterval(pollSlowData, 10000);
+    // Loop adaptativo ejecutado cada 1000ms para decidir si realizar peticiones
+    let lastFastPollTime = 0;
+    let lastSlowPollTime = 0;
+
+    const intervalId = setInterval(() => {
+      const now = Date.now();
+      const idleTime = now - lastActivityTime;
+      const isIdle = idleTime > 120000; // Inactivo tras 2 minutos (120,000 ms) de reposo
+
+      // Si la pestaña no está visible o el usuario está inactivo, detener el polling completamente
+      if (!isTabVisible || isIdle) {
+        return;
+      }
+
+      // 15s si está chateando (chatsoporte), 3 minutos de lo contrario (solo para ver notificaciones de alertas)
+      const fastIntervalLimit = (activeTab === 'chatsoporte') ? 15000 : 180000;
+
+      // 5 minutos para el resto de tablas transaccionales
+      const slowIntervalLimit = 300000;
+
+      if (now - lastFastPollTime >= fastIntervalLimit) {
+        pollFastData();
+        lastFastPollTime = now;
+      }
+
+      if (now - lastSlowPollTime >= slowIntervalLimit) {
+        pollSlowData();
+        lastSlowPollTime = now;
+      }
+    }, 1000);
 
     return () => {
-      clearInterval(fastInterval);
-      clearInterval(slowInterval);
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(intervalId);
     };
-  }, [isSupabaseEnabled]);
+  }, [isSupabaseEnabled, activeTab]);
 
   // Keep ticking live clock
   useEffect(() => {
@@ -3028,6 +3434,20 @@ export default function App() {
             })()}
           </div>
 
+          {/* Sync Button */}
+          {isSupabaseEnabled && (
+            <button 
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className={`flex items-center justify-center bg-slate-900 text-gray-400 hover:text-white p-2 rounded-lg border border-cyber-border hover:border-cyber-pink/50 cursor-pointer transition-all ${
+                isSyncing ? 'opacity-60 cursor-not-allowed' : ''
+              }`}
+              title="Sincronizar base de datos con Supabase"
+            >
+              <RefreshCw size={14} className={`text-cyber-pink ${isSyncing ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+
           {/* Fullscreen Toggle Button */}
           <button 
             onClick={toggleFullscreen}
@@ -3331,6 +3751,7 @@ export default function App() {
               currentUser={currentUser}
               showToast={showToast}
               onAssignAgent={handleAssignAgent}
+              users={users}
             />
           )}
 

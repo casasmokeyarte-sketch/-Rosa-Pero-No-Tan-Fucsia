@@ -255,7 +255,7 @@ export default function HistorialFacturas({
 
       {/* ── MODAL: Ver Detalle ─────────────────────────────── */}
       {viewInvoice && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setViewInvoice(null)}>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 print-modal-container" onClick={() => setViewInvoice(null)}>
           <div className="bg-cyber-card border border-cyber-border rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={e => e.stopPropagation()}>
 
@@ -325,7 +325,14 @@ export default function HistorialFacturas({
                   <tbody className="divide-y divide-cyber-border/30">
                     {viewInvoice.items.map((item, i) => (
                       <tr key={i}>
-                        <td className="px-3 py-2 text-white print:text-black">{item.productName}</td>
+                        <td className="px-3 py-2 text-white print:text-black font-semibold">
+                          {item.productName}
+                          {item.note && (
+                            <span className="block text-[9px] text-cyber-pink font-mono italic font-normal print:text-gray-600">
+                              * Nota: {item.note}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-gray-300 print:text-gray-700">{item.quantity}</td>
                         <td className="px-3 py-2 text-gray-300 print:text-gray-700">${item.price.toFixed(2)}</td>
                         <td className="px-3 py-2 text-gray-300 print:text-gray-700">${item.taxAmount.toFixed(2)}</td>

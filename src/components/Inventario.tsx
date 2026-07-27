@@ -78,6 +78,7 @@ export default function Inventario({
   const [editSpecialPrice1g, setEditSpecialPrice1g] = useState('');
   const [editSpecialPriceHalfG, setEditSpecialPriceHalfG] = useState('');
   const [editSpecialPriceQuarterG, setEditSpecialPriceQuarterG] = useState('');
+  const [editNote, setEditNote] = useState('');
   
   // Subtab State
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'traspasos'>('catalogo');
@@ -110,6 +111,7 @@ export default function Inventario({
   const [newSpecialPrice1g, setNewSpecialPrice1g] = useState<string>('');
   const [newSpecialPriceHalfG, setNewSpecialPriceHalfG] = useState<string>('');
   const [newSpecialPriceQuarterG, setNewSpecialPriceQuarterG] = useState<string>('');
+  const [newNote, setNewNote] = useState('');
 
   // Adjustment fields
   const [adjustType, setAdjustType] = useState<'Ingreso' | 'Egreso'>('Ingreso');
@@ -148,6 +150,7 @@ export default function Inventario({
       specialPrice1g: newUnitType === 'gr' && newSpecialPrice1g !== '' ? parseFloat(newSpecialPrice1g) : undefined,
       specialPriceHalfG: newUnitType === 'gr' && newSpecialPriceHalfG !== '' ? parseFloat(newSpecialPriceHalfG) : undefined,
       specialPriceQuarterG: newUnitType === 'gr' && newSpecialPriceQuarterG !== '' ? parseFloat(newSpecialPriceQuarterG) : undefined,
+      note: newNote.trim() || undefined,
     };
 
     onAddProduct(nProduct);
@@ -178,6 +181,7 @@ export default function Inventario({
     setNewSpecialPrice1g('');
     setNewSpecialPriceHalfG('');
     setNewSpecialPriceQuarterG('');
+    setNewNote('');
     setShowAddProduct(false);
   };
 
@@ -195,6 +199,7 @@ export default function Inventario({
     setEditSpecialPrice1g(p.specialPrice1g?.toString() || '');
     setEditSpecialPriceHalfG(p.specialPriceHalfG?.toString() || '');
     setEditSpecialPriceQuarterG(p.specialPriceQuarterG?.toString() || '');
+    setEditNote(p.note || '');
   };
 
   // Submit product edit
@@ -214,7 +219,8 @@ export default function Inventario({
       unitType: editUnitType,
       specialPrice1g: editUnitType === 'gr' && editSpecialPrice1g !== '' ? parseFloat(editSpecialPrice1g) : undefined,
       specialPriceHalfG: editUnitType === 'gr' && editSpecialPriceHalfG !== '' ? parseFloat(editSpecialPriceHalfG) : undefined,
-      specialPriceQuarterG: editUnitType === 'gr' && editSpecialPriceQuarterG !== '' ? parseFloat(editSpecialPriceQuarterG) : undefined
+      specialPriceQuarterG: editUnitType === 'gr' && editSpecialPriceQuarterG !== '' ? parseFloat(editSpecialPriceQuarterG) : undefined,
+      note: editNote.trim() || undefined,
     };
 
     onUpdateProduct(updated);
@@ -614,6 +620,16 @@ export default function Inventario({
                           {p.name}
                         </h3>
                         <p className="text-[10px] font-mono text-gray-500 mt-0.5">CÓD: {p.code}</p>
+
+                        {p.note && (
+                          <div className="text-[9px] text-amber-400 font-mono bg-amber-950/20 border border-amber-500/20 px-2 py-1 rounded mt-1.5 flex items-start gap-1">
+                            <span className="shrink-0 mt-0.5">⚠️</span>
+                            <div>
+                              <strong className="text-[8px] uppercase tracking-wider block text-amber-500">Nota de Inventario:</strong>
+                              <span>{p.note}</span>
+                            </div>
+                          </div>
+                        )}
 
                         {p.unitType === 'gr' && (p.specialPrice1g || p.specialPriceHalfG || p.specialPriceQuarterG) && (
                           <div className="text-[9px] text-cyber-pink font-mono bg-cyber-pink/5 border border-cyber-pink/10 px-1.5 py-0.5 rounded mt-1.5">
@@ -1325,6 +1341,16 @@ export default function Inventario({
                     placeholder="📦"
                   />
                 </div>
+
+                <div className="space-y-1 col-span-2">
+                  <label className="text-gray-400 font-mono">Nota / Observación de Inventario (Alerta e Inconsistencia)</label>
+                  <textarea 
+                    value={newNote} 
+                    onChange={e => setNewNote(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink resize-none h-16"
+                    placeholder="P. ej. Inconsistencia de 0.5g / Detalle en empaque..."
+                  />
+                </div>
               </div>
 
               <div className="flex gap-2 justify-end pt-4">
@@ -1493,6 +1519,16 @@ export default function Inventario({
                     onChange={e => setEditEmoji(e.target.value)}
                     className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink text-center text-lg"
                     placeholder="📦"
+                  />
+                </div>
+
+                <div className="space-y-1 col-span-2">
+                  <label className="text-gray-400 font-mono">Nota / Observación de Inventario (Alerta e Inconsistencia)</label>
+                  <textarea 
+                    value={editNote} 
+                    onChange={e => setEditNote(e.target.value)}
+                    className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white text-xs focus:outline-none glow-border-pink resize-none h-16"
+                    placeholder="P. ej. Inconsistencia de 0.5g / Detalle en empaque..."
                   />
                 </div>
               </div>

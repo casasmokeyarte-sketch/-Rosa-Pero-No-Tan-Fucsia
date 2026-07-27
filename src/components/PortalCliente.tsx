@@ -412,7 +412,7 @@ export default function PortalCliente({
         const newQty = Math.min(product.stock, existing.quantity + 1);
         return prev.map(item => item.product.id === product.id ? { ...item, quantity: newQty } : item);
       }
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { product, quantity: 1, note: '' }];
     });
   };
 
@@ -422,6 +422,11 @@ export default function PortalCliente({
     if (!prod) return;
     const finalQty = Math.max(1, Math.min(prod.stock, qty));
     setCart(prev => prev.map(item => item.product.id === productId ? { ...item, quantity: finalQty } : item));
+  };
+
+  // Update cart item custom note
+  const updateCartNote = (productId: string, note: string) => {
+    setCart(prev => prev.map(item => item.product.id === productId ? { ...item, note } : item));
   };
 
   // Remove item from cart
@@ -437,7 +442,8 @@ export default function PortalCliente({
       price: item.product.price,
       quantity: item.quantity,
       taxAmount: 0,
-      total: item.product.price * item.quantity
+      total: item.product.price * item.quantity,
+      note: item.note
     }));
 
     const orderNum = `WEB-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1019,12 +1025,18 @@ export default function PortalCliente({
                           }`}
                         >
                           <div className="flex justify-between items-start gap-1">
-                            <div>
+                            <div className="min-w-0 flex-1">
                               <span className="text-[8px] font-mono text-gray-500 block">{prod.code}</span>
                               <h3 className="text-xs font-bold text-white font-sans line-clamp-2 mt-0.5">{prod.name}</h3>
                               <span className="text-[9px] text-cyber-pink font-mono block mt-1">{prod.category}</span>
+                              {prod.note && (
+                                <div className="text-[8px] text-amber-400 font-mono mt-1 flex items-start gap-1 bg-amber-950/20 px-1.5 py-1 rounded border border-amber-500/20 max-w-[200px]">
+                                  <span className="shrink-0">⚠️</span>
+                                  <span className="line-clamp-2" title={prod.note}>{prod.note}</span>
+                                </div>
+                              )}
                             </div>
-                            <span className="text-xl bg-slate-900 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800">{prod.imageUrl || '📦'}</span>
+                            <span className="text-xl bg-slate-900 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 shrink-0">{prod.imageUrl || '📦'}</span>
                           </div>
 
                           <div className="mt-4 flex items-center justify-between border-t border-slate-800/80 pt-2">
@@ -1102,30 +1114,44 @@ export default function PortalCliente({
                           ) : (
                             <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                               {cart.map(item => (
-                                <div key={item.product.id} className="flex justify-between items-center text-xs font-mono bg-slate-900/60 p-2 rounded-lg border border-slate-800">
-                                  <div className="max-w-[120px] truncate">
-                                    <span className="text-[8px] text-gray-500 block">{item.product.code}</span>
-                                    <span className="font-bold text-white block truncate">{item.product.name}</span>
+                                <div key={item.product.id} className="flex flex-col gap-1.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 text-xs font-mono">
+                                  <div className="flex justify-between items-center">
+                                    <div className="max-w-[120px] truncate">
+                                      <span className="text-[8px] text-gray-500 block">{item.product.code}</span>
+                                      <span className="font-bold text-white block truncate">{item.product.name}</span>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-1">
+                                      <input 
+                                        type="number" 
+                                        value={item.quantity}
+                                        onChange={e => updateCartQty(item.product.id, parseInt(e.target.value) || 1)}
+                                        className="w-10 bg-cyber-bg border border-slate-800 text-center text-xs text-white p-1 rounded focus:outline-none font-mono"
+                                        min="1"
+                                        max={item.product.stock}
+                                      />
+                                      <button 
+                                        type="button"
+                                        onClick={() => removeFromCart(item.product.id)}
+                                        className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    <span className="font-extrabold text-white text-right">${(item.product.price * item.quantity).toFixed(2)}</span>
                                   </div>
                                   
-                                  <div className="flex items-center gap-1">
+                                  {/* Custom item note */}
+                                  <div className="flex items-center gap-1.5 w-full">
+                                    <span className="text-[8px] text-cyber-pink font-bold uppercase tracking-wider shrink-0">Nota:</span>
                                     <input 
-                                      type="number" 
-                                      value={item.quantity}
-                                      onChange={e => updateCartQty(item.product.id, parseInt(e.target.value) || 1)}
-                                      className="w-10 bg-cyber-bg border border-slate-800 text-center text-xs text-white p-1 rounded focus:outline-none font-mono"
-                                      min="1"
-                                      max={item.product.stock}
+                                      type="text"
+                                      placeholder="P. ej. empaque original, etc."
+                                      value={item.note || ''}
+                                      onChange={e => updateCartNote(item.product.id, e.target.value)}
+                                      className="flex-1 bg-cyber-bg border border-slate-850 px-2 py-0.5 rounded text-[10px] text-white focus:outline-none focus:border-cyber-pink font-mono"
                                     />
-                                    <button 
-                                      type="button"
-                                      onClick={() => removeFromCart(item.product.id)}
-                                      className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
-                                    >
-                                      ✕
-                                    </button>
                                   </div>
-                                  <span className="font-extrabold text-white text-right">${(item.product.price * item.quantity).toFixed(2)}</span>
                                 </div>
                               ))}
                             </div>
@@ -1549,6 +1575,12 @@ export default function PortalCliente({
                             {prod.stock} UNIDADES
                           </span>
                         </div>
+                        {prod.note && (
+                          <div className="text-[9px] text-amber-400 font-mono mt-2 flex items-start gap-1 bg-amber-950/20 px-2 py-1 rounded border border-amber-500/20">
+                            <span className="shrink-0 mt-0.5">⚠️</span>
+                            <span>{prod.note}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -2470,7 +2502,7 @@ export default function PortalCliente({
 
       {/* PRINT OVERLAY MODAL */}
       {selectedInvoiceForPrint && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
           <div className="bg-white text-black p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black">
             {/* Header */}
             <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
@@ -2524,9 +2556,16 @@ export default function PortalCliente({
               <div className="font-bold">INSUMOS ADQUIRIDOS:</div>
               <div className="space-y-1 border-t border-dashed border-black/20 pt-1.5 mt-1">
                 {selectedInvoiceForPrint.items.map((it, idx) => (
-                  <div key={idx} className="flex justify-between font-bold">
-                    <span>{it.productName} (x{it.quantity})</span>
-                    <span>${it.total.toLocaleString('es-CO')}</span>
+                  <div key={idx} className="space-y-0.5">
+                    <div className="flex justify-between font-bold">
+                      <span>{it.productName} (x{it.quantity})</span>
+                      <span>${it.total.toLocaleString('es-CO')}</span>
+                    </div>
+                    {it.note && (
+                      <div className="text-[9px] text-gray-600 italic pl-2">
+                        * Nota: {it.note}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

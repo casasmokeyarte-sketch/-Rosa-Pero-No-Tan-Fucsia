@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatMessage, ChatAttachment, Client } from '../types';
+import { ChatMessage, ChatAttachment, Client, User as UserType } from '../types';
 import { 
   MessageSquare, 
   Send, 
@@ -30,9 +30,10 @@ interface ChatSoporteProps {
     attachment?: ChatAttachment
   ) => void;
   onClearChat: (clientId: string) => void;
-  currentUser: { id: string; fullName: string };
+  currentUser: any;
   showToast: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
   onAssignAgent: (clientId: string, agentId: string, agentName: string) => void;
+  users?: UserType[];
 }
 
 export default function ChatSoporte({
@@ -42,7 +43,8 @@ export default function ChatSoporte({
   onClearChat,
   currentUser,
   showToast,
-  onAssignAgent
+  onAssignAgent,
+  users = []
 }: ChatSoporteProps) {
   const [selectedClientId, setSelectedClientId] = useState<string>(() => {
     // Default to the first client in list with chat messages or just the first non-casual client
@@ -112,6 +114,73 @@ export default function ChatSoporte({
 
   // Filter messages for current client
   const activeMessages = chatMessages.filter(msg => msg.clientId === selectedClientId);
+
+  const [lastReadTimestamps, setLastReadTimestamps] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('extreme_chat_last_read_timestamps');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  // Initialize timestamps on mount for current clients to prevent marking all historical chats as unread
+  useEffect(() => {
+    setLastReadTimestamps(prev => {
+      let updated = { ...prev };
+      let changed = false;
+      clients.forEach(c => {
+        if (!updated[c.id]) {
+          updated[c.id] = new Date().toISOString();
+          changed = true;
+        }
+      });
+      if (changed) {
+        try {
+          localStorage.setItem('extreme_chat_last_read_timestamps', JSON.stringify(updated));
+        } catch (e) {
+          console.warn("localStorage save failed:", e);
+        }
+        return updated;
+      }
+      return prev;
+    });
+  }, [clients]);
+
+  // Mark selected client as read
+  useEffect(() => {
+    if (selectedClientId) {
+      setLastReadTimestamps(prev => {
+        const now = new Date().toISOString();
+        if (prev[selectedClientId] === now) return prev;
+        const updated = { ...prev, [selectedClientId]: now };
+        try {
+          localStorage.setItem('extreme_chat_last_read_timestamps', JSON.stringify(updated));
+        } catch (e) {
+          console.warn("localStorage save failed:", e);
+        }
+        return updated;
+      });
+    }
+  }, [selectedClientId, chatMessages]);
+
+  const getUnreadMessageCount = (clientId: string) => {
+    if (clientId === selectedClientId) return 0;
+    const lastRead = lastReadTimestamps[clientId];
+    if (!lastRead) return 0;
+    return chatMessages.filter(msg => 
+      msg.clientId === clientId && 
+      msg.sender === 'client' && 
+      new Date(msg.timestamp).getTime() > new Date(lastRead).getTime()
+    ).length;
+  };
+
+  const getLastMessageTimestamp = (clientId: string) => {
+    const msgs = chatMessages.filter(msg => msg.clientId === clientId);
+    if (msgs.length === 0) return 0;
+    const last = msgs[msgs.length - 1];
+    return new Date(last.timestamp).getTime();
+  };
 
   // Count messages per client for badges
   const getMessageCount = (clientId: string) => {
@@ -322,6 +391,10 @@ export default function ChatSoporte({
     return hasMessages || isManuallyAdded;
   });
 
+  const sortedChatClients = [...chatClients].sort((a, b) => {
+    return getLastMessageTimestamp(b.id) - getLastMessageTimestamp(a.id);
+  });
+
   return (
     <div className="space-y-6" id="agent-chat-support">
       
@@ -386,50 +459,64 @@ export default function ChatSoporte({
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-slate-900 pr-1">
-            {chatClients.length === 0 ? (
+            {sortedChatClients.length === 0 ? (
               <div className="p-8 text-center text-gray-600 font-mono text-xs leading-relaxed select-none">
                 Bandeja de chats vacía.
                 <p className="text-[10px] text-gray-700 mt-2">Seleccione un cliente arriba para iniciar el canal de soporte.</p>
               </div>
             ) : (
-              chatClients.map(c => {
-              const isSelected = c.id === selectedClientId;
-              const lastMsg = getLastMessageText(c.id);
-              const count = getMessageCount(c.id);
+              sortedChatClients.map(c => {
+                const isSelected = c.id === selectedClientId;
+                const lastMsg = getLastMessageText(c.id);
+                const unreadCount = getUnreadMessageCount(c.id);
+                const isUnread = unreadCount > 0;
 
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedClientId(c.id);
-                    if (!c.assignedAgentId && currentUser && onAssignAgent) {
-                      onAssignAgent(c.id, currentUser.id, currentUser.fullName);
-                    }
-                  }}
-                  className={`p-3.5 flex items-start gap-3 cursor-pointer transition-all ${
-                    isSelected 
-                      ? 'bg-cyber-pink/10 border-l-4 border-cyber-pink text-white' 
-                      : 'hover:bg-slate-900/40 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <div className="w-9 h-9 rounded-lg bg-slate-950 border border-slate-900 flex items-center justify-center text-cyber-pink font-extrabold text-sm shrink-0 uppercase">
-                    {c.name.substring(0, 2)}
-                  </div>
-                  <div className="min-w-0 flex-1 font-mono text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-white truncate block max-w-[130px]">{c.name}</span>
-                      {count > 0 && (
-                        <span className="bg-cyber-pink text-black text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse">
-                          {count}
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => {
+                      setSelectedClientId(c.id);
+                      if (!c.assignedAgentId && currentUser && onAssignAgent) {
+                        onAssignAgent(c.id, currentUser.id, currentUser.fullName);
+                      }
+                    }}
+                    className={`p-3.5 flex items-start gap-3 cursor-pointer transition-all ${
+                      isSelected 
+                        ? 'bg-cyber-pink/10 border-l-4 border-cyber-pink text-white' 
+                        : isUnread
+                          ? 'bg-emerald-500/10 border-l-4 border-emerald-500 text-emerald-100 hover:bg-emerald-500/20'
+                          : 'hover:bg-slate-900/40 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <div className={`w-9 h-9 rounded-lg bg-slate-950 border flex items-center justify-center font-extrabold text-sm shrink-0 uppercase ${
+                      isSelected
+                        ? 'border-cyber-pink text-cyber-pink'
+                        : isUnread
+                          ? 'border-emerald-500 text-emerald-400'
+                          : 'border-slate-900 text-gray-400'
+                    }`}>
+                      {c.name.substring(0, 2)}
+                    </div>
+                    <div className="min-w-0 flex-1 font-mono text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-white truncate block max-w-[130px]">{c.name}</span>
+                        {unreadCount > 0 && (
+                          <span className="bg-emerald-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-gray-500 block truncate mt-1">{lastMsg}</span>
+                      {c.assignedAgentId && (
+                        <span className="text-[8px] text-cyber-pink mt-1 block uppercase font-extrabold tracking-wider">
+                          Asesor: {c.assignedAgentName}
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] text-gray-500 block truncate mt-1">{lastMsg}</span>
                   </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -459,6 +546,32 @@ export default function ChatSoporte({
                 </div>
 
                 <div className="flex items-center gap-3">
+                  {currentUser.role === 'Administrador' && (
+                    <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-lg font-mono text-[10px] text-gray-300">
+                      <span className="text-gray-500 uppercase text-[9px] font-bold">Asignar Operador:</span>
+                      <select
+                        value={activeClient.assignedAgentId || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            onAssignAgent(activeClient.id, '', '');
+                          } else {
+                            const found = users.find(u => u.id === val);
+                            if (found) {
+                              onAssignAgent(activeClient.id, found.id, found.fullName);
+                            }
+                          }
+                        }}
+                        className="bg-slate-950 border border-cyber-border text-white text-[10px] p-1 rounded focus:outline-none font-mono"
+                      >
+                        <option value="">-- Cola General (Sin Asignar) --</option>
+                        {users.map(u => (
+                          <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="text-right hidden sm:block">
                     <span className="text-[9px] text-gray-500 block">Cartera Pendiente:</span>
                     <span className="text-cyber-orange font-bold font-mono">${activeClient.outstandingBalance.toFixed(2)} USD</span>

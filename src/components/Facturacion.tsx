@@ -426,6 +426,16 @@ export default function Facturacion({
     setCartItems(cartItems.filter(item => item.productId !== productId));
   };
 
+  // Set custom note for an item in cart
+  const handleSetItemNote = (productId: string, note: string) => {
+    setCartItems(prev => prev.map(item => {
+      if (item.productId === productId) {
+        return { ...item, note };
+      }
+      return item;
+    }));
+  };
+
   // Quick Client Creation
   const handleCreateQuickClient = (e: React.FormEvent) => {
     e.preventDefault();
@@ -824,6 +834,11 @@ export default function Facturacion({
                       <div>
                         <div className="font-semibold text-white">{p.name}</div>
                         <div className="text-[10px] text-gray-400 font-mono mt-0.5">CÓD: {p.code} | {p.category}</div>
+                        {p.note && (
+                          <div className="text-[9px] text-amber-400 font-mono mt-1 flex items-center gap-1 bg-amber-950/20 px-1 py-0.5 rounded border border-amber-500/20 max-w-[220px]">
+                            <span>⚠️ {p.note}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="text-right font-mono">
@@ -878,6 +893,22 @@ export default function Facturacion({
                       <div className="text-[9px] text-gray-400 font-mono mt-0.5 uppercase tracking-wide">
                         {item.unitType === 'gr' ? '⚖️ Por Peso (Gramaje)' : item.unitType === 'ml' ? '🧪 Por Volumen (ML)' : item.unitType === 'l' ? '🍶 Por Volumen (Litros)' : '📦 Por Unidad'}
                       </div>
+                      
+                      {/* Custom note for item */}
+                      <div className="mt-1.5 flex items-center gap-1.5 max-w-[200px] no-print">
+                        <input
+                          type="text"
+                          value={item.note || ''}
+                          onChange={(e) => handleSetItemNote(item.productId, e.target.value)}
+                          placeholder="Agregar nota / especificación..."
+                          className="w-full bg-slate-950 border border-slate-800 text-[10px] px-2 py-1 rounded text-white focus:outline-none focus:border-cyber-pink font-mono"
+                        />
+                      </div>
+                      {item.note && (
+                        <div className="text-[9px] text-cyber-pink font-mono mt-1 hidden print:block">
+                          * Nota: {item.note}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 text-right">
                       ${item.price.toFixed(2)}
@@ -1506,7 +1537,7 @@ export default function Facturacion({
       )}
            {/* MODAL / OVERLAY: High-fidelity thermal invoice visualizer */}
       {generatedInvoice && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
           <div className="bg-white text-black p-6 rounded-2xl max-w-sm w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card">
             
             {/* Tab selector inside print modal */}
@@ -1612,16 +1643,25 @@ export default function Facturacion({
                     </thead>
                     <tbody>
                       {generatedInvoice.items.map(item => (
-                        <tr key={item.productId}>
-                          <td className="py-1">
-                            <span className="font-bold">{item.quantity} {item.unitType === 'gr' ? 'g' : item.unitType === 'ml' ? 'ml' : item.unitType === 'l' ? 'L' : 'u'}</span> x {item.productName}
-                          </td>
-                          <td className="py-1 text-right">
-                            ${item.price.toFixed(2)}
-                            <span className="text-[8px] text-gray-500">/{item.unitType === 'gr' ? 'g' : item.unitType === 'ml' ? 'ml' : item.unitType === 'l' ? 'L' : 'u'}</span>
-                          </td>
-                          <td className="py-1 text-right">${item.total.toFixed(2)}</td>
-                        </tr>
+                        <React.Fragment key={item.productId}>
+                          <tr>
+                            <td className="py-1">
+                              <span className="font-bold">{item.quantity} {item.unitType === 'gr' ? 'g' : item.unitType === 'ml' ? 'ml' : item.unitType === 'l' ? 'L' : 'u'}</span> x {item.productName}
+                            </td>
+                            <td className="py-1 text-right">
+                              ${item.price.toFixed(2)}
+                              <span className="text-[8px] text-gray-500">/{item.unitType === 'gr' ? 'g' : item.unitType === 'ml' ? 'ml' : item.unitType === 'l' ? 'L' : 'u'}</span>
+                            </td>
+                            <td className="py-1 text-right">${item.total.toFixed(2)}</td>
+                          </tr>
+                          {item.note && (
+                            <tr>
+                              <td colSpan={3} className="pb-1.5 pl-2 text-[9px] text-gray-600 italic">
+                                * Nota: {item.note}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>

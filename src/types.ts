@@ -39,6 +39,7 @@ export interface Product {
   specialPriceHalfG?: number; // Special price for exactly 0.5 Gr (1/2 Gr)
   specialPriceQuarterG?: number; // Special price for exactly 0.25 Gr (1/4 Gr)
   userStocks?: { [userId: string]: number }; // Stock of each user
+  note?: string; // Observación/Inconsistencia administrativa
 }
 
 export interface InvoiceItem {
@@ -49,6 +50,7 @@ export interface InvoiceItem {
   taxAmount: number;
   total: number;
   unitType?: 'unidad' | 'gr' | 'ml' | 'l';
+  note?: string; // Nota individual del producto en la factura
 }
 
 export interface Invoice {
