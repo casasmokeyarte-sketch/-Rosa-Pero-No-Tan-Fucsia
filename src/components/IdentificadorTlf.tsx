@@ -154,7 +154,7 @@ export default function IdentificadorTlf({ clients, onAddClient, showToast }: Id
       email: `${rec.ownerName.toLowerCase().replace(/\s+/g, '')}@bunker.com`,
       phone: rec.phoneNumber,
       address: rec.address,
-      creditLimit: rec.reputation === 'Confiable' ? 1000.00 : 0.00,
+      creditLimit: 0,
       outstandingBalance: 0,
       createdAt: new Date().toISOString()
     };
