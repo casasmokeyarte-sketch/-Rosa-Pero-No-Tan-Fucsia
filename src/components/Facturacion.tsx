@@ -73,7 +73,7 @@ export default function Facturacion({
   const [quickClientRut, setQuickClientRut] = useState('');
   const [quickClientEmail, setQuickClientEmail] = useState('');
   const [quickClientPhone, setQuickClientPhone] = useState('');
-  const [quickClientCredit, setQuickClientCredit] = useState(1000);
+  const [quickClientCredit, setQuickClientCredit] = useState(0);
 
   // Generated Invoice state (for receipt modal)
   const [generatedInvoice, setGeneratedInvoice] = useState<Invoice | null>(null);
@@ -451,7 +451,7 @@ export default function Facturacion({
       email: quickClientEmail || "operaciones@anonimo.net",
       phone: quickClientPhone || "+57 (300) 000-0000",
       address: "Zona Franca de Tránsito",
-      creditLimit: parseFloat(quickClientCredit.toString()) || 1000,
+      creditLimit: 0,
       outstandingBalance: 0,
       createdAt: new Date().toISOString()
     };
@@ -465,7 +465,7 @@ export default function Facturacion({
     setQuickClientRut('');
     setQuickClientEmail('');
     setQuickClientPhone('');
-    setQuickClientCredit(1000);
+    setQuickClientCredit(0);
     setShowQuickClient(false);
     setErrorMsg(null);
   };
@@ -695,10 +695,10 @@ export default function Facturacion({
                   className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
                 />
                 <div className="sm:col-span-2">
-                  <label className="block text-[10px] text-gray-400 font-mono mb-1">CUPO DE CRÉDITO DISPONIBLE (COP)</label>
+                  <label className="block text-[10px] text-gray-400 font-mono mb-1">CUPO DE CRÉDITO: SOLO ADMINISTRADOR</label>
                   <input 
                     type="number" 
-                    value={quickClientCredit}
+                    value={0} disabled
                     onChange={e => setQuickClientCredit(Math.max(0, parseInt(e.target.value) || 0))}
                     className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
                   />

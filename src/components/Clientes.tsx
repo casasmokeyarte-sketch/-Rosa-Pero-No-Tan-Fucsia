@@ -57,7 +57,7 @@ export default function Clientes({
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientAddress, setClientAddress] = useState('');
-  const [clientCreditLimit, setClientCreditLimit] = useState(2000);
+  const [clientCreditLimit, setClientCreditLimit] = useState(0);
   const [clientPassword, setClientPassword] = useState('');
   const [showClientPwd, setShowClientPwd] = useState(false);
   const [createdClientCode, setCreatedClientCode] = useState<string | null>(null);
@@ -132,7 +132,7 @@ export default function Clientes({
     setClientEmail('');
     setClientPhone('');
     setClientAddress('');
-    setClientCreditLimit(2000);
+    setClientCreditLimit(0);
     setClientPassword('');
     setShowAddModal(false);
   };
@@ -193,7 +193,7 @@ export default function Clientes({
     setClientEmail('');
     setClientPhone('');
     setClientAddress('');
-    setClientCreditLimit(2000);
+    setClientCreditLimit(0);
     setClientPassword('');
     setShowEditModal(false);
     setEditingClient(null);
@@ -248,7 +248,7 @@ export default function Clientes({
           email: item.email || "operaciones@anonimo.net",
           phone: item.phone || "+57 (300) 000-0000",
           address: item.address || "Zona Franca",
-          creditLimit: parseFloat(item.creditLimit) || 1000,
+          creditLimit: 0,
           outstandingBalance: parseFloat(item.outstandingBalance) || 0,
           createdAt: item.createdAt || new Date().toISOString()
         };
@@ -912,7 +912,7 @@ export default function Clientes({
     "email": "contacto@ejemplo.com",
     "phone": "+57 311 0000000",
     "address": "Calle Falsa 123",
-    "creditLimit": 5000,
+    "creditLimit": 0,
     "outstandingBalance": 0
   }
 ]'

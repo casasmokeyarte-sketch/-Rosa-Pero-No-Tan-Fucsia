@@ -118,27 +118,27 @@ insert into clients (
 ('c-1', 'Corporación CyberDyne', 'NIT', '901.442.111-4',
  'suministros@cyberdyne.corp', '+57 (601) 334-1122',
  'Torre Principal de Innovación, Piso 42',
- 2500.00, 850.00, '1234', '2026-01-15T08:00:00-05:00'),
+ 0, 850.00, '1234', '2026-01-15T08:00:00-05:00'),
 
 ('c-2', 'Sindicato de Mensajeros del Páramo', 'NIT', '800.512.663-9',
  'enlaces@paramocourier.org', '+57 (315) 888-2910',
  'Hangar de Tránsito, Autopista de Ceniza Km 12',
- 1000.00, 0.00, '1234', '2026-02-10T10:30:00-05:00'),
+ 0, 0.00, '1234', '2026-02-10T10:30:00-05:00'),
 
 ('c-3', 'Laboratorios Weyland-Yutani', 'NIT', '902.120.887-1',
  'procurement@weyland.bio', '+57 (602) 445-5678',
  'Domo de Investigación Médica #3',
- 5000.00, 450.00, '1234', '2026-03-01T14:15:00-05:00'),
+ 0, 450.00, '1234', '2026-03-01T14:15:00-05:00'),
 
 ('c-4', 'Elena Vance (Investigadora)', 'CC', '1.020.450.992-0',
  'elena.vance@resistencia.net', '+57 (320) 412-9988',
  'Subnivel 4, Laboratorios Black Mesa',
- 500.00, 120.00, '1234', '2026-04-18T11:00:00-05:00'),
+ 0, 120.00, '1234', '2026-04-18T11:00:00-05:00'),
 
 ('c-5', 'Nakamura Trading Ltd', 'NIT', '700.334.881-2',
  'contact@nakamuratrading.jp', '+57 (601) 777-8899',
  'Distrito Financiero de Neón, Of. 909',
- 3000.00, 0.00, '1234', '2026-05-22T09:45:00-05:00')
+ 0, 0.00, '1234', '2026-05-22T09:45:00-05:00')
 
 on conflict (id) do update set
   name                = excluded.name,
