@@ -111,6 +111,29 @@ export async function fetchTable(table: string): Promise<any[]> {
   return mapKeys(data, toCamelCase) || [];
 }
 
+export function mergeRecordsById<T extends { id: string }>(local: T[], remote: T[]): T[] {
+  const merged = new Map<string, T>();
+
+  local.forEach(item => merged.set(item.id, item));
+  remote.forEach(item => merged.set(item.id, item));
+
+  return Array.from(merged.values());
+}
+
+export async function syncMissingRecords(
+  table: string,
+  local: Array<{ id: string }>,
+  remote: Array<{ id: string }>
+): Promise<void> {
+  const remoteIds = new Set(remote.map(item => item.id));
+  const missing = local.filter(item => !remoteIds.has(item.id));
+
+  if (missing.length === 0) return;
+
+  await Promise.allSettled(
+    missing.map(item => syncUpsert(table, item))
+  );
+}
 export async function fetchConfig(): Promise<any | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.from('business_config').select('*').eq('id', 'singleton').maybeSingle();
