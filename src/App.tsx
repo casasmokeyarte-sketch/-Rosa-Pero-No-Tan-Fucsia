@@ -29,7 +29,7 @@ import {
   INITIAL_ADJUSTMENTS 
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
-import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
+import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys, mergeRecordsById, syncMissingRecords } from './lib/sync';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -914,6 +914,7 @@ export default function App() {
 
       const dbInvoices = await fetchTable('invoices');
       if (dbInvoices && dbInvoices.length > 0) {
+        await syncMissingRecords('invoices', invoices, dbInvoices);
         dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
         setInvoices(prev => {
           const merged = [...prev];
@@ -926,10 +927,16 @@ export default function App() {
       }
 
       const dbExpenses = await fetchTable('expenses');
-      if (dbExpenses && dbExpenses.length > 0) setExpenses(dbExpenses);
+      if (dbExpenses && dbExpenses.length > 0) {
+        await syncMissingRecords('expenses', expenses, dbExpenses);
+        setExpenses(prev => mergeRecordsById(prev, dbExpenses));
+      }
 
       const dbShifts = await fetchTable('shifts');
-      if (dbShifts && dbShifts.length > 0) setShifts(dbShifts);
+      if (dbShifts && dbShifts.length > 0) {
+        await syncMissingRecords('shifts', shifts, dbShifts);
+        setShifts(prev => mergeRecordsById(prev, dbShifts));
+      }
 
       const dbAdjustments = await fetchTable('stock_adjustments');
       if (dbAdjustments && dbAdjustments.length > 0) setAdjustments(dbAdjustments);
@@ -1060,6 +1067,7 @@ export default function App() {
           try {
             const dbInvoices = await fetchTable('invoices');
             if (dbInvoices && dbInvoices.length > 0) {
+        await syncMissingRecords('invoices', invoices, dbInvoices);
               dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
               setInvoices(prev => {
                 const merged = [...prev];
@@ -1084,7 +1092,8 @@ export default function App() {
           try {
             const dbExpenses = await fetchTable('expenses');
             if (dbExpenses && dbExpenses.length > 0) {
-              setExpenses(dbExpenses);
+              await syncMissingRecords('expenses', expenses, dbExpenses);
+              setExpenses(prev => mergeRecordsById(prev, dbExpenses));
             } else if (expenses.length > 0) {
               for (const exp of expenses) {
                 await syncUpsert('expenses', exp);
@@ -1096,9 +1105,10 @@ export default function App() {
 
           // Shifts
           try {
-            const dbShifts = await fetchTable('shifts');
+        const dbShifts = await fetchTable('shifts');
             if (dbShifts && dbShifts.length > 0) {
-              setShifts(dbShifts);
+              await syncMissingRecords('shifts', shifts, dbShifts);
+              setShifts(prev => mergeRecordsById(prev, dbShifts));
             } else if (shifts.length > 0) {
               for (const sh of shifts) {
                 await syncUpsert('shifts', sh);
@@ -1670,6 +1680,7 @@ export default function App() {
       try {
         const dbInvoices = await fetchTable('invoices');
         if (dbInvoices && dbInvoices.length > 0) {
+        await syncMissingRecords('invoices', invoices, dbInvoices);
           setInvoices(prev => {
             const merged = [...prev];
             dbInvoices.forEach(dbInv => {
@@ -1723,13 +1734,27 @@ export default function App() {
           });
         }
 
+        const dbExpenses = await fetchTable('expenses');
+        if (dbExpenses && dbExpenses.length > 0) {
+          setExpenses(prev => {
+            const merged = mergeRecordsById(prev, dbExpenses);
+            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
+            const sortedMerged = [...merged].sort((a, b) => a.id.localeCompare(b.id));
+
+            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedMerged)) {
+              return merged;
+            }
+
+            return prev;
+          });
+        }
         const dbShifts = await fetchTable('shifts');
         if (dbShifts && dbShifts.length > 0) {
           const sortedNew = [...dbShifts].sort((a, b) => a.id.localeCompare(b.id));
           setShifts(prev => {
             const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
             if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return dbShifts;
+              return mergeRecordsById(prev, dbShifts);
             }
             return prev;
           });
