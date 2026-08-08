@@ -914,7 +914,7 @@ export default function App() {
 
       const dbInvoices = await fetchTable('invoices');
       if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices);
+        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
         dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
         setInvoices(prev => {
           const merged = [...prev];
@@ -928,14 +928,14 @@ export default function App() {
 
       const dbExpenses = await fetchTable('expenses');
       if (dbExpenses && dbExpenses.length > 0) {
-        await syncMissingRecords('expenses', expenses, dbExpenses);
-        setExpenses(prev => mergeRecordsById(prev, dbExpenses));
+        await syncMissingRecords('expenses', expenses, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
+        setExpenses(prev => mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id)));
       }
 
       const dbShifts = await fetchTable('shifts');
       if (dbShifts && dbShifts.length > 0) {
-        await syncMissingRecords('shifts', shifts, dbShifts);
-        setShifts(prev => mergeRecordsById(prev, dbShifts));
+        await syncMissingRecords('shifts', shifts, dbShifts, INITIAL_SHIFTS.map(item => item.id));
+        setShifts(prev => mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id)));
       }
 
       const dbAdjustments = await fetchTable('stock_adjustments');
@@ -1067,7 +1067,7 @@ export default function App() {
           try {
             const dbInvoices = await fetchTable('invoices');
             if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices);
+        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
               dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
               setInvoices(prev => {
                 const merged = [...prev];
@@ -1092,8 +1092,8 @@ export default function App() {
           try {
             const dbExpenses = await fetchTable('expenses');
             if (dbExpenses && dbExpenses.length > 0) {
-              await syncMissingRecords('expenses', expenses, dbExpenses);
-              setExpenses(prev => mergeRecordsById(prev, dbExpenses));
+              await syncMissingRecords('expenses', expenses, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
+              setExpenses(prev => mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id)));
             } else if (expenses.length > 0) {
               for (const exp of expenses) {
                 await syncUpsert('expenses', exp);
@@ -1107,8 +1107,8 @@ export default function App() {
           try {
         const dbShifts = await fetchTable('shifts');
             if (dbShifts && dbShifts.length > 0) {
-              await syncMissingRecords('shifts', shifts, dbShifts);
-              setShifts(prev => mergeRecordsById(prev, dbShifts));
+              await syncMissingRecords('shifts', shifts, dbShifts, INITIAL_SHIFTS.map(item => item.id));
+              setShifts(prev => mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id)));
             } else if (shifts.length > 0) {
               for (const sh of shifts) {
                 await syncUpsert('shifts', sh);
@@ -1680,7 +1680,7 @@ export default function App() {
       try {
         const dbInvoices = await fetchTable('invoices');
         if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices);
+        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
           setInvoices(prev => {
             const merged = [...prev];
             dbInvoices.forEach(dbInv => {
@@ -1737,7 +1737,7 @@ export default function App() {
         const dbExpenses = await fetchTable('expenses');
         if (dbExpenses && dbExpenses.length > 0) {
           setExpenses(prev => {
-            const merged = mergeRecordsById(prev, dbExpenses);
+            const merged = mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
             const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
             const sortedMerged = [...merged].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -1754,7 +1754,7 @@ export default function App() {
           setShifts(prev => {
             const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
             if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return mergeRecordsById(prev, dbShifts);
+              return mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id));
             }
             return prev;
           });
