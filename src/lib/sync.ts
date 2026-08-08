@@ -111,11 +111,12 @@ export async function fetchTable(table: string): Promise<any[]> {
   return mapKeys(data, toCamelCase) || [];
 }
 
-export function mergeRecordsById<T extends { id: string }>(local: T[], remote: T[]): T[] {
+export function mergeRecordsById<T extends { id: string }>(local: T[], remote: T[], ignoredIds: string[] = []): T[] {
   const merged = new Map<string, T>();
+  const ignoredIdsSet = new Set(ignoredIds);
 
-  local.forEach(item => merged.set(item.id, item));
-  remote.forEach(item => merged.set(item.id, item));
+  local.forEach(item => { if (!ignoredIdsSet.has(item.id)) merged.set(item.id, item); });
+  remote.forEach(item => { if (!ignoredIdsSet.has(item.id)) merged.set(item.id, item); });
 
   return Array.from(merged.values());
 }
@@ -123,10 +124,12 @@ export function mergeRecordsById<T extends { id: string }>(local: T[], remote: T
 export async function syncMissingRecords(
   table: string,
   local: Array<{ id: string }>,
-  remote: Array<{ id: string }>
+  remote: Array<{ id: string }>,
+  ignoredIds: string[] = []
 ): Promise<void> {
   const remoteIds = new Set(remote.map(item => item.id));
-  const missing = local.filter(item => !remoteIds.has(item.id));
+  const ignoredIdsSet = new Set(ignoredIds);
+  const missing = local.filter(item => !remoteIds.has(item.id) && !ignoredIdsSet.has(item.id));
 
   if (missing.length === 0) return;
 
