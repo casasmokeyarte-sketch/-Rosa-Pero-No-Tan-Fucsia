@@ -423,10 +423,10 @@ export default function ChatSoporte({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[550px]">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 h-auto lg:h-[550px]">
         
         {/* LEFT COLUMN: CLIENTS CHAT LIST (4 cols) */}
-        <div className="lg:col-span-4 bg-cyber-card border border-cyber-border rounded-xl flex flex-col h-full overflow-hidden">
+        <div className="lg:col-span-4 bg-cyber-card border border-cyber-border rounded-xl flex flex-col h-[320px] lg:h-full overflow-hidden">
           <div className="bg-slate-950 p-4 border-b border-cyber-border font-mono text-xs space-y-3">
             <div className="flex justify-between items-center">
               <span className="font-bold text-cyber-pink block uppercase">Cuentas en Chat ({chatClients.length})</span>
@@ -521,7 +521,7 @@ export default function ChatSoporte({
         </div>
 
         {/* RIGHT COLUMN: ACTIVE CHAT CHANNELS (8 cols) */}
-        <div className="lg:col-span-8 bg-cyber-card border border-cyber-border rounded-xl flex flex-col h-full overflow-hidden">
+        <div className="lg:col-span-8 bg-cyber-card border border-cyber-border rounded-xl flex flex-col h-[580px] lg:h-full overflow-hidden">
           
           {activeClient ? (
             <div className="flex flex-col h-full overflow-hidden">
@@ -614,7 +614,7 @@ export default function ChatSoporte({
                     return (
                       <div 
                         key={msg.id} 
-                        className={`flex flex-col max-w-[85%] ${isAgent ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                        className={`flex flex-col max-w-[92%] ${isAgent ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
                         <span className="text-[9px] text-gray-500 font-mono mb-0.5">
                           {msg.senderName} • {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

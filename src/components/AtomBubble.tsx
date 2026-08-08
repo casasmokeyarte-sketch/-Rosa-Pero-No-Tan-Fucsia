@@ -139,6 +139,9 @@ export default function AtomBubble({
     return hasMessages || isManuallyAdded;
   });
 
+  const getLastMessageTimestamp = (clientId: string) => chatMessages.reduce((latest, msg) => msg.clientId === clientId ? Math.max(latest, new Date(msg.timestamp).getTime() || 0) : latest, 0);
+  const sortedAgentChatClients = [...agentChatClients].sort((a, b) => getLastMessageTimestamp(b.id) - getLastMessageTimestamp(a.id));
+
   // Get active selected client info
   const activeClient = type === 'client' 
     ? client 
@@ -436,7 +439,7 @@ export default function AtomBubble({
       {/* FLOATING CHAT WIDGET BOX */}
       {isOpen && (
         <div 
-          className={`fixed bottom-24 right-4 left-4 sm:left-auto sm:right-5 sm:w-[380px] h-[520px] bg-cyber-card/95 border border-cyber-border rounded-2xl flex flex-col z-50 shadow-[0_0_30px_rgba(4,7,14,0.85)] overflow-hidden font-mono text-xs backdrop-blur-md select-text ${
+          className={`fixed bottom-20 right-1 left-1 sm:bottom-24 sm:left-auto sm:right-5 sm:w-[440px] h-[calc(100dvh-6rem)] max-h-[620px] sm:h-[560px] bg-cyber-card/95 border border-cyber-border rounded-2xl flex flex-col z-50 shadow-[0_0_30px_rgba(4,7,14,0.85)] overflow-hidden font-mono text-xs backdrop-blur-md select-text ${
             type === 'agent' ? 'mr-0 sm:mr-[70px]' : ''
           }`}
         >
@@ -510,7 +513,7 @@ export default function AtomBubble({
               </div>
 
               <div className="flex-1 overflow-y-auto divide-y divide-slate-900">
-                {agentChatClients.map(c => {
+                {sortedAgentChatClients.map(c => {
                   const msgs = chatMessages.filter(m => m.clientId === c.id);
                   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
                   const isAssignedToMe = c.assignedAgentId === currentUser?.id;
@@ -633,7 +636,7 @@ export default function AtomBubble({
                     return (
                       <div 
                         key={msg.id} 
-                        className={`flex flex-col max-w-[85%] ${isMyMsg ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                        className={`flex flex-col max-w-[92%] ${isMyMsg ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
                         <span className="text-[8px] text-gray-500 font-mono mb-0.5">
                           {msg.senderName} • {new Date(msg.timestamp).toLocaleDateString('es-CO')} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
