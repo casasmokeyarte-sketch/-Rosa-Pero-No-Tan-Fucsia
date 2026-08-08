@@ -1080,9 +1080,7 @@ export default function App() {
                 return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
               });
             } else if (invoices.length > 0) {
-              for (const inv of invoices) {
-                await syncUpsert('invoices', inv);
-              }
+              await syncMissingRecords('invoices', invoices, [], INITIAL_INVOICES.map(item => item.id));
             }
           } catch (e) {
             console.error("Error cargando invoices en segundo plano:", e);
@@ -1095,9 +1093,7 @@ export default function App() {
               await syncMissingRecords('expenses', expenses, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
               setExpenses(prev => mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id)));
             } else if (expenses.length > 0) {
-              for (const exp of expenses) {
-                await syncUpsert('expenses', exp);
-              }
+              await syncMissingRecords('expenses', expenses, [], INITIAL_EXPENSES.map(item => item.id));
             }
           } catch (e) {
             console.error("Error cargando expenses en segundo plano:", e);
@@ -1110,9 +1106,7 @@ export default function App() {
               await syncMissingRecords('shifts', shifts, dbShifts, INITIAL_SHIFTS.map(item => item.id));
               setShifts(prev => mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id)));
             } else if (shifts.length > 0) {
-              for (const sh of shifts) {
-                await syncUpsert('shifts', sh);
-              }
+              await syncMissingRecords('shifts', shifts, [], INITIAL_SHIFTS.map(item => item.id));
             }
           } catch (e) {
             console.error("Error cargando shifts en segundo plano:", e);
