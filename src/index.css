@@ -250,3 +250,20 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Print isolation fix */
+@media print {
+  body:has(.print-modal-container) main > :not(.print-modal-container) {
+    display: block !important;
+    visibility: hidden !important;
+  }
+
+  body:has(.print-modal-container) .print-modal-container,
+  body:has(.print-modal-container) .print-modal-container * {
+    visibility: visible !important;
+  }
+
+  .scanlines::after {
+    display: none !important;
+  }
+}

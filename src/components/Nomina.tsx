@@ -286,7 +286,7 @@ export default function Nomina({ users, payrollEntries, config, currentUserName,
 
       {/* ── PRINT MODAL ─── */}
       {printEntry && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setPrintEntry(null)}>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 print-modal-container" onClick={() => setPrintEntry(null)}>
           <div className="bg-white text-black rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6 space-y-4 print:block" id="nomina-print">
               <div className="flex justify-between items-center no-print border-b pb-3">

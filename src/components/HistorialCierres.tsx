@@ -338,7 +338,7 @@ export default function HistorialCierres({
         {/* Right column: Selected shift accounting details */}
         <div className="lg:col-span-5 space-y-4">
           {selectedShift ? (
-            <div className="bg-white text-black p-6 rounded-2xl font-mono text-xs shadow-2xl relative border-2 border-black print-card space-y-4">
+            <div className="bg-white text-black p-6 rounded-2xl font-mono text-xs shadow-2xl relative border-2 border-black print-card print-modal-container space-y-4">
               
               <div className="flex justify-between items-center border-b border-black pb-2 no-print">
                 <span className="font-extrabold text-black uppercase text-xs tracking-wider">REPORTE DE AUDITORÍA CONTABLE</span>
