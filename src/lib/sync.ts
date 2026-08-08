@@ -52,8 +52,18 @@ export function mapKeys(obj: any, mapper: (s: string) => string): any {
   return obj;
 }
 
+const BLOCKED_DEMO_HISTORY_IDS: Record<string, Set<string>> = {
+  invoices: new Set(['inv-1', 'inv-2', 'inv-3', 'inv-4']),
+  expenses: new Set(['exp-1', 'exp-2']),
+  shifts: new Set(['shift-old-1', 'shift-current', 'shift-seed-1'])
+};
+
 // Global CRUD helpers
 export async function syncUpsert(table: string, data: any) {
+  if (data?.id && BLOCKED_DEMO_HISTORY_IDS[table]?.has(data.id)) {
+    console.warn('Blocked demo history upsert:', table, data.id);
+    return null;
+  }
   if (!supabase) return null;
   const mapped = mapKeys(data, toSnakeCase);
   const { error } = await supabase.from(table).upsert(mapped);
