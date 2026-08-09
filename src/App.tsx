@@ -201,17 +201,23 @@ export default function App() {
 
   const [invoices, setInvoices] = useState<Invoice[]>(() => {
     const saved = localStorage.getItem('extreme_invoices');
-    return saved ? JSON.parse(saved) : INITIAL_INVOICES;
+    const parsed: Invoice[] = saved ? JSON.parse(saved) : [];
+    const demoIds = new Set(INITIAL_INVOICES.map(item => item.id));
+    return parsed.filter(item => !demoIds.has(item.id));
   });
 
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     const saved = localStorage.getItem('extreme_expenses');
-    return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    const parsed: Expense[] = saved ? JSON.parse(saved) : [];
+    const demoIds = new Set(INITIAL_EXPENSES.map(item => item.id));
+    return parsed.filter(item => !demoIds.has(item.id));
   });
 
   const [shifts, setShifts] = useState<Shift[]>(() => {
     const saved = localStorage.getItem('extreme_shifts');
-    return saved ? JSON.parse(saved) : INITIAL_SHIFTS;
+    const parsed: Shift[] = saved ? JSON.parse(saved) : [];
+    const demoIds = new Set(INITIAL_SHIFTS.map(item => item.id));
+    return parsed.filter(item => !demoIds.has(item.id));
   });
 
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>(() => {
@@ -3480,7 +3486,7 @@ export default function App() {
           <button 
             onClick={() => {
               setIsAuthenticated(false);
-              setCurrentUser(INITIAL_USERS[1]);
+              localStorage.removeItem('extreme_current_user');
             }}
             className="flex items-center justify-center bg-slate-900 text-gray-400 hover:text-red-400 p-2 rounded-lg border border-cyber-border hover:border-red-500/50 cursor-pointer transition-all"
             title="Cerrar Sesión / Bloquear Terminal"
