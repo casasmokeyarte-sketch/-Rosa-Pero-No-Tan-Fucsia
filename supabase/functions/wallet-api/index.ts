@@ -1,0 +1,565 @@
+import { createClient } from "npm:@supabase/supabase-js@2.110.0";
+
+type ActorType = "operator" | "client";
+
+type WalletSession = {
+  id: string;
+  actor_type: ActorType;
+  user_id: string | null;
+  client_id: string | null;
+  actor_role: string;
+  expires_at: string;
+};
+
+const JSON_HEADERS = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+};
+const MAX_BODY_BYTES = 32_768;
+const SESSION_HOURS_OPERATOR = 12;
+const SESSION_HOURS_CLIENT = 24 * 7;
+const LOGIN_WINDOW_MINUTES = 15;
+const LOGIN_IDENTIFIER_LIMIT = 8;
+const LOGIN_IP_LIMIT = 20;
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const sessionPepper = Deno.env.get("WALLET_SESSION_PEPPER") ?? "";
+const nfcPepper = Deno.env.get("WALLET_NFC_PEPPER") ?? "";
+const allowedOrigins = new Set(
+  (Deno.env.get("WALLET_ALLOWED_ORIGINS") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
+
+const admin = createClient(supabaseUrl, serviceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+  global: { headers: { "X-Client-Info": "casa-smoke-wallet-api/1.0" } },
+});
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...JSON_HEADERS,
+    "Access-Control-Allow-Headers": "authorization, content-type, x-requested-with",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+
+  if (origin && allowedOrigins.has(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+
+  return headers;
+}
+
+function response(
+  origin: string | null,
+  status: number,
+  body: Record<string, unknown>,
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: corsHeaders(origin),
+  });
+}
+
+function isOriginAllowed(origin: string | null): boolean {
+  // Requests made by server tools do not include Origin. Browser origins must
+  // always be explicitly allowlisted.
+  return origin === null || allowedOrigins.has(origin);
+}
+
+function normalizeRoute(pathname: string): string {
+  const marker = "/wallet-api";
+  const index = pathname.indexOf(marker);
+  const route = index >= 0 ? pathname.slice(index + marker.length) : pathname;
+  return route === "" ? "/" : route.replace(/\/$/, "") || "/";
+}
+
+function requiredString(
+  value: unknown,
+  field: string,
+  maxLength = 200,
+): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${field} is required`);
+  }
+
+  const normalized = value.trim();
+  if (normalized.length > maxLength) {
+    throw new Error(`${field} is too long`);
+  }
+
+  return normalized;
+}
+
+function optionalString(value: unknown, maxLength = 200): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") throw new Error("Invalid text value");
+  const normalized = value.trim();
+  if (normalized.length > maxLength) throw new Error("Text value is too long");
+  return normalized || null;
+}
+
+function normalizeUid(value: string): string {
+  const normalized = value.replace(/[^0-9a-f]/gi, "").toLowerCase();
+  if (normalized.length < 8 || normalized.length > 64) {
+    throw new Error("Invalid NFC UID");
+  }
+  return normalized;
+}
+
+function requiredPositiveAmount(value: unknown, field: string): number {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`${field} must be greater than zero`);
+  }
+  return Math.round(amount * 100) / 100;
+}
+
+async function parseJson(req: Request): Promise<Record<string, unknown>> {
+  const declaredLength = Number(req.headers.get("content-length") ?? "0");
+  if (declaredLength > MAX_BODY_BYTES) throw new Error("Request body is too large");
+
+  const raw = await req.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
+    throw new Error("Request body is too large");
+  }
+
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("JSON object expected");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function randomToken(): string {
+  return bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return bytesToHex(new Uint8Array(digest));
+}
+
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("cf-connecting-ip") ||
+    "unknown"
+  );
+}
+
+async function recordAuthEvent(event: Record<string, unknown>): Promise<void> {
+  const { error } = await admin.from("wallet_auth_events").insert(event);
+  if (error) console.error("wallet_auth_event_failed", error.code);
+}
+
+async function failureCount(
+  column: "identifier_hash" | "ip_hash",
+  hash: string,
+  since: string,
+): Promise<number> {
+  const { count, error } = await admin
+    .from("wallet_auth_events")
+    .select("id", { count: "exact", head: true })
+    .eq("event_type", "login_failure")
+    .eq(column, hash)
+    .gte("created_at", since);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function login(
+  req: Request,
+  origin: string | null,
+  actorType: ActorType,
+): Promise<Response> {
+  const body = await parseJson(req);
+  const password = requiredString(body.password, "password", 256);
+  const identifier = requiredString(
+    actorType === "operator" ? body.username : body.code,
+    actorType === "operator" ? "username" : "code",
+    120,
+  );
+
+  const normalizedIdentifier = identifier.toLowerCase();
+  const identifierHash = await sha256Hex(`${normalizedIdentifier}:${sessionPepper}`);
+  const ipHash = await sha256Hex(`${clientIp(req)}:${sessionPepper}`);
+  const since = new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60_000).toISOString();
+  const [identifierFailures, ipFailures] = await Promise.all([
+    failureCount("identifier_hash", identifierHash, since),
+    failureCount("ip_hash", ipHash, since),
+  ]);
+
+  if (identifierFailures >= LOGIN_IDENTIFIER_LIMIT || ipFailures >= LOGIN_IP_LIMIT) {
+    await recordAuthEvent({
+      event_type: "rate_limited",
+      actor_type: actorType,
+      identifier_hash: identifierHash,
+      ip_hash: ipHash,
+    });
+    return response(origin, 429, { ok: false, error: "Intenta nuevamente más tarde." });
+  }
+
+  const functionName = actorType === "operator"
+    ? "wallet_verify_operator_credentials"
+    : "wallet_verify_client_credentials";
+  const params = actorType === "operator"
+    ? { p_username: identifier, p_password: password }
+    : { p_code: identifier, p_password: password };
+  const { data, error } = await admin.rpc(functionName, params);
+  if (error) throw error;
+
+  const actor = Array.isArray(data) ? data[0] : null;
+  if (!actor) {
+    await recordAuthEvent({
+      event_type: "login_failure",
+      actor_type: actorType,
+      identifier_hash: identifierHash,
+      ip_hash: ipHash,
+    });
+    return response(origin, 401, { ok: false, error: "Credenciales incorrectas." });
+  }
+
+  const rawToken = randomToken();
+  const tokenHash = await sha256Hex(`${rawToken}:${sessionPepper}`);
+  const sessionHours = actorType === "operator"
+    ? SESSION_HOURS_OPERATOR
+    : SESSION_HOURS_CLIENT;
+  const expiresAt = new Date(Date.now() + sessionHours * 3_600_000).toISOString();
+  const sessionRecord = {
+    token_hash: tokenHash,
+    actor_type: actorType,
+    user_id: actorType === "operator" ? actor.actor_id : null,
+    client_id: actorType === "client" ? actor.actor_id : null,
+    actor_role: actor.actor_role,
+    expires_at: expiresAt,
+    metadata: {
+      user_agent: (req.headers.get("user-agent") ?? "unknown").slice(0, 300),
+    },
+  };
+
+  const { data: session, error: sessionError } = await admin
+    .from("wallet_auth_sessions")
+    .insert(sessionRecord)
+    .select("id")
+    .single();
+  if (sessionError) throw sessionError;
+
+  await recordAuthEvent({
+    event_type: "login_success",
+    actor_type: actorType,
+    actor_id: actor.actor_id,
+    identifier_hash: identifierHash,
+    ip_hash: ipHash,
+    session_id: session.id,
+  });
+
+  return response(origin, 200, {
+    ok: true,
+    token: rawToken,
+    expires_at: expiresAt,
+    actor: {
+      id: actor.actor_id,
+      name: actor.actor_name,
+      role: actor.actor_role,
+      type: actorType,
+    },
+  });
+}
+
+async function requireSession(req: Request): Promise<WalletSession> {
+  const authorization = req.headers.get("authorization") ?? "";
+  const match = authorization.match(/^Bearer\s+([0-9a-f]{64})$/i);
+  if (!match) throw new Error("UNAUTHORIZED");
+
+  const tokenHash = await sha256Hex(`${match[1].toLowerCase()}:${sessionPepper}`);
+  const { data, error } = await admin
+    .from("wallet_auth_sessions")
+    .select("id,actor_type,user_id,client_id,actor_role,expires_at")
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("UNAUTHORIZED");
+
+  const { error: touchError } = await admin
+    .from("wallet_auth_sessions")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("id", data.id);
+  if (touchError) console.error("wallet_session_touch_failed", touchError.code);
+
+  return data as WalletSession;
+}
+
+function clientIdForRequest(session: WalletSession, url: URL): string {
+  if (session.actor_type === "client") return requiredString(session.client_id, "client_id");
+  return requiredString(url.searchParams.get("client_id"), "client_id", 120);
+}
+
+function requireOperator(session: WalletSession): void {
+  if (session.actor_type !== "operator" || !session.user_id) {
+    throw new Error("FORBIDDEN");
+  }
+}
+
+async function getActor(session: WalletSession): Promise<Record<string, unknown> | null> {
+  if (session.actor_type === "operator") {
+    const { data, error } = await admin
+      .from("users")
+      .select("id,full_name,username,role,status")
+      .eq("id", session.user_id)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await admin
+    .from("clients")
+    .select("id,name,code,email,phone")
+    .eq("id", session.client_id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function walletSummary(clientId: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await admin
+    .from("wallet_account_summary")
+    .select(
+      "wallet_account_id,client_id,client_name,balance,currency,status,savings_goal_name,savings_goal_amount,updated_at",
+    )
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function handleAuthenticated(
+  req: Request,
+  origin: string | null,
+  route: string,
+  url: URL,
+): Promise<Response> {
+  const session = await requireSession(req);
+
+  if (req.method === "POST" && route === "/logout") {
+    const now = new Date().toISOString();
+    const { error } = await admin
+      .from("wallet_auth_sessions")
+      .update({ revoked_at: now, revoked_reason: "logout" })
+      .eq("id", session.id);
+    if (error) throw error;
+    await recordAuthEvent({
+      event_type: "logout",
+      actor_type: session.actor_type,
+      actor_id: session.user_id ?? session.client_id,
+      session_id: session.id,
+    });
+    return response(origin, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && route === "/me") {
+    return response(origin, 200, {
+      ok: true,
+      actor_type: session.actor_type,
+      actor_role: session.actor_role,
+      actor: await getActor(session),
+      expires_at: session.expires_at,
+    });
+  }
+
+  if (req.method === "GET" && route === "/wallet") {
+    const clientId = clientIdForRequest(session, url);
+    const wallet = await walletSummary(clientId);
+    if (!wallet) return response(origin, 404, { ok: false, error: "Bolsillo no encontrado." });
+
+    const { data: cards, error } = await admin
+      .from("nfc_cards")
+      .select("id,status,label,issued_at,last_seen_at")
+      .eq("client_id", clientId)
+      .order("issued_at", { ascending: false });
+    if (error) throw error;
+
+    return response(origin, 200, { ok: true, wallet, cards: cards ?? [] });
+  }
+
+  if (req.method === "GET" && route === "/transactions") {
+    const clientId = clientIdForRequest(session, url);
+    const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
+    const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 50));
+    const { data, error } = await admin
+      .from("wallet_transactions")
+      .select(
+        "id,direction,kind,amount,balance_after,source,operator_name,shift_id,invoice_id,notes,created_at,reversal_of",
+      )
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return response(origin, 200, { ok: true, transactions: data ?? [] });
+  }
+
+  if (req.method === "PATCH" && route === "/wallet/goal") {
+    const body = await parseJson(req);
+    const clientId = session.actor_type === "client"
+      ? requiredString(session.client_id, "client_id")
+      : requiredString(body.client_id, "client_id", 120);
+    const goalName = optionalString(body.savings_goal_name, 160);
+    const goalAmount = body.savings_goal_amount === null || body.savings_goal_amount === ""
+      ? null
+      : requiredPositiveAmount(body.savings_goal_amount, "savings_goal_amount");
+    const { error } = await admin
+      .from("wallet_accounts")
+      .update({ savings_goal_name: goalName, savings_goal_amount: goalAmount })
+      .eq("client_id", clientId);
+    if (error) throw error;
+    return response(origin, 200, { ok: true, wallet: await walletSummary(clientId) });
+  }
+
+  if (req.method === "POST" && route === "/nfc/lookup") {
+    requireOperator(session);
+    const body = await parseJson(req);
+    const publicToken = optionalString(body.public_token, 160);
+    const uid = optionalString(body.uid, 200);
+    if (!publicToken && !uid) throw new Error("public_token or uid is required");
+
+    let query = admin
+      .from("nfc_cards")
+      .select("id,client_id,status,label,issued_at,last_seen_at");
+    query = publicToken
+      ? query.eq("public_token", publicToken)
+      : query.eq("uid_hash", await sha256Hex(`${normalizeUid(uid!)}:${nfcPepper}`));
+    const { data: card, error } = await query.maybeSingle();
+    if (error) throw error;
+    if (!card) return response(origin, 404, { ok: false, error: "Tarjeta no encontrada." });
+    if (card.status !== "active") {
+      return response(origin, 409, { ok: false, error: "La tarjeta no está activa.", card });
+    }
+
+    const [{ data: client, error: clientError }, wallet] = await Promise.all([
+      admin
+        .from("clients")
+        .select("id,name,rut,email,phone")
+        .eq("id", card.client_id)
+        .maybeSingle(),
+      walletSummary(card.client_id),
+    ]);
+    if (clientError) throw clientError;
+    await admin.from("nfc_cards").update({ last_seen_at: new Date().toISOString() }).eq("id", card.id);
+    return response(origin, 200, { ok: true, card, client, wallet });
+  }
+
+  if (req.method === "POST" && route === "/nfc/issue") {
+    requireOperator(session);
+    const body = await parseJson(req);
+    const clientId = requiredString(body.client_id, "client_id", 120);
+    const uid = optionalString(body.uid, 200);
+    const label = optionalString(body.label, 120);
+    const record: Record<string, unknown> = {
+      client_id: clientId,
+      label,
+      issued_by_user_id: session.user_id,
+    };
+    if (uid) record.uid_hash = await sha256Hex(`${normalizeUid(uid)}:${nfcPepper}`);
+
+    const { data, error } = await admin
+      .from("nfc_cards")
+      .insert(record)
+      .select("id,client_id,public_token,status,label,issued_at")
+      .single();
+    if (error?.code === "23505") {
+      return response(origin, 409, {
+        ok: false,
+        error: "El cliente o la tarjeta ya tiene una vinculación activa.",
+      });
+    }
+    if (error) throw error;
+    return response(origin, 201, { ok: true, card: data });
+  }
+
+  if (req.method === "POST" && route === "/nfc/block") {
+    requireOperator(session);
+    const body = await parseJson(req);
+    const cardId = requiredString(body.card_id, "card_id", 100);
+    const { data, error } = await admin
+      .from("nfc_cards")
+      .update({ status: "blocked", blocked_at: new Date().toISOString() })
+      .eq("id", cardId)
+      .eq("status", "active")
+      .select("id,client_id,status,blocked_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return response(origin, 404, { ok: false, error: "Tarjeta activa no encontrada." });
+    return response(origin, 200, { ok: true, card: data });
+  }
+
+  return response(origin, 404, { ok: false, error: "Ruta no encontrada." });
+}
+
+Deno.serve(async (req) => {
+  const origin = req.headers.get("origin");
+
+  if (!isOriginAllowed(origin)) {
+    return response(origin, 403, { ok: false, error: "Origen no autorizado." });
+  }
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  }
+
+  if (!supabaseUrl || !serviceRoleKey || sessionPepper.length < 32 || nfcPepper.length < 32) {
+    return response(origin, 503, { ok: false, error: "Wallet API no está configurada." });
+  }
+
+  const url = new URL(req.url);
+  const route = normalizeRoute(url.pathname);
+
+  try {
+    if (req.method === "GET" && route === "/health") {
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 1 });
+    }
+    if (req.method === "POST" && route === "/login/operator") {
+      return await login(req, origin, "operator");
+    }
+    if (req.method === "POST" && route === "/login/client") {
+      return await login(req, origin, "client");
+    }
+
+    return await handleAuthenticated(req, origin, route, url);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "UNKNOWN";
+    if (message === "UNAUTHORIZED") {
+      return response(origin, 401, { ok: false, error: "Sesión inválida o vencida." });
+    }
+    if (message === "FORBIDDEN") {
+      return response(origin, 403, { ok: false, error: "No tienes permiso para esta acción." });
+    }
+    if (
+      message.includes("required") ||
+      message.includes("too long") ||
+      message.includes("greater than zero") ||
+      message.includes("JSON") ||
+      message.includes("too large") ||
+      message.includes("Invalid NFC UID")
+    ) {
+      return response(origin, 400, { ok: false, error: message });
+    }
+
+    console.error("wallet_api_error", message);
+    return response(origin, 500, { ok: false, error: "Error interno del Bolsillo." });
+  }
+});
