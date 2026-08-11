@@ -316,6 +316,45 @@ function requireOperator(session: WalletSession): void {
   }
 }
 
+function requireAdministrator(session: WalletSession): void {
+  requireOperator(session);
+  if (session.actor_role.trim().toLowerCase() !== "administrador") {
+    throw new Error("FORBIDDEN");
+  }
+}
+
+async function activeShiftForOperator(session: WalletSession): Promise<{
+  id: string;
+  user: string;
+  start_time: string | null;
+}> {
+  requireOperator(session);
+
+  const { data: operator, error: operatorError } = await admin
+    .from("users")
+    .select("id,full_name,status")
+    .eq("id", session.user_id)
+    .maybeSingle();
+  if (operatorError) throw operatorError;
+  if (!operator || operator.status !== "Activo") throw new Error("FORBIDDEN");
+
+  const { data: openShifts, error: shiftError } = await admin
+    .from("shifts")
+    .select("id,user,start_time")
+    .eq("status", "Abierta")
+    .order("start_time", { ascending: false });
+  if (shiftError) throw shiftError;
+
+  const operatorName = operator.full_name.trim().toLowerCase();
+  const matches = (openShifts ?? []).filter(
+    (shift) => typeof shift.user === "string" && shift.user.trim().toLowerCase() === operatorName,
+  );
+
+  if (matches.length === 0) throw new Error("OPEN_SHIFT_REQUIRED");
+  if (matches.length > 1) throw new Error("MULTIPLE_OPEN_SHIFTS");
+  return matches[0];
+}
+
 async function getActor(session: WalletSession): Promise<Record<string, unknown> | null> {
   if (session.actor_type === "operator") {
     const { data, error } = await admin
@@ -430,6 +469,87 @@ async function handleAuthenticated(
     return response(origin, 200, { ok: true, wallet: await walletSummary(clientId) });
   }
 
+  if (req.method === "POST" && route === "/operator/topup") {
+    requireOperator(session);
+    const body = await parseJson(req);
+    const clientId = requiredString(body.client_id, "client_id", 120);
+    const amount = requiredPositiveAmount(body.amount, "amount");
+    if (amount > 50_000_000) throw new Error("amount is outside the allowed range");
+    const paymentMethod = requiredString(body.payment_method, "payment_method", 30)
+      .toLowerCase();
+    const idempotencyKey = requiredString(body.idempotency_key, "idempotency_key", 160);
+    const notes = optionalString(body.notes, 500);
+    if (!["cash", "transfer", "card"].includes(paymentMethod)) {
+      throw new Error("Unsupported office top-up payment method");
+    }
+
+    const shift = await activeShiftForOperator(session);
+    const { data, error } = await admin.rpc("wallet_post_operator_topup", {
+      p_client_id: clientId,
+      p_amount: amount,
+      p_payment_method: paymentMethod,
+      p_idempotency_key: idempotencyKey,
+      p_operator_user_id: session.user_id,
+      p_shift_id: shift.id,
+      p_notes: notes,
+      p_metadata: { api_version: 2 },
+    });
+    if (error) throw error;
+    return response(origin, 201, { ok: true, transaction: data, shift });
+  }
+
+  if (req.method === "POST" && route === "/operator/reverse") {
+    requireAdministrator(session);
+    const body = await parseJson(req);
+    const transactionId = requiredString(body.transaction_id, "transaction_id", 100);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transactionId)) {
+      throw new Error("Invalid transaction_id");
+    }
+    const idempotencyKey = requiredString(body.idempotency_key, "idempotency_key", 160);
+    const notes = requiredString(body.notes, "notes", 500);
+    const shift = await activeShiftForOperator(session);
+    const { data, error } = await admin.rpc("wallet_reverse_operator_transaction", {
+      p_transaction_id: transactionId,
+      p_idempotency_key: idempotencyKey,
+      p_operator_user_id: session.user_id,
+      p_shift_id: shift.id,
+      p_notes: notes,
+    });
+    if (error) throw error;
+    return response(origin, 201, { ok: true, transaction: data, shift });
+  }
+
+  if (req.method === "GET" && route === "/shift/summary") {
+    requireOperator(session);
+    const activeShift = await activeShiftForOperator(session);
+    const requestedShiftId = optionalString(url.searchParams.get("shift_id"), 120);
+    if (requestedShiftId && requestedShiftId !== activeShift.id) {
+      requireAdministrator(session);
+    }
+    const shiftId = requestedShiftId ?? activeShift.id;
+    const { data, error } = await admin
+      .from("wallet_shift_closure_summary")
+      .select(
+        "shift_id,operator_name,shift_status,movement_count,cash_topups,transfer_topups,card_topups,wallet_purchases,ledger_credits,ledger_debits",
+      )
+      .eq("shift_id", shiftId)
+      .maybeSingle();
+    if (error) throw error;
+    return response(origin, 200, {
+      ok: true,
+      summary: data ?? {
+        shift_id: shiftId,
+        movement_count: 0,
+        cash_topups: 0,
+        transfer_topups: 0,
+        card_topups: 0,
+        wallet_purchases: 0,
+        ledger_credits: 0,
+        ledger_debits: 0,
+      },
+    });
+  }
+
   if (req.method === "POST" && route === "/nfc/lookup") {
     requireOperator(session);
     const body = await parseJson(req);
@@ -530,7 +650,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 1 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 2 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -541,7 +661,11 @@ Deno.serve(async (req) => {
 
     return await handleAuthenticated(req, origin, route, url);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "UNKNOWN";
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+      ? String((error as { message: unknown }).message)
+      : "UNKNOWN";
     if (message === "UNAUTHORIZED") {
       return response(origin, 401, { ok: false, error: "Sesión inválida o vencida." });
     }
@@ -549,12 +673,26 @@ Deno.serve(async (req) => {
       return response(origin, 403, { ok: false, error: "No tienes permiso para esta acción." });
     }
     if (
+      message === "OPEN_SHIFT_REQUIRED" ||
+      message === "MULTIPLE_OPEN_SHIFTS" ||
+      message.includes("open shift") ||
+      message.includes("shift does not belong")
+    ) {
+      return response(origin, 409, {
+        ok: false,
+        error: "El operador necesita un único turno abierto propio.",
+      });
+    }
+    if (
       message.includes("required") ||
       message.includes("too long") ||
       message.includes("greater than zero") ||
+      message.includes("outside the allowed range") ||
       message.includes("JSON") ||
       message.includes("too large") ||
-      message.includes("Invalid NFC UID")
+      message.includes("Invalid NFC UID") ||
+      message.includes("Invalid transaction_id") ||
+      message.includes("Unsupported office top-up payment method")
     ) {
       return response(origin, 400, { ok: false, error: message });
     }

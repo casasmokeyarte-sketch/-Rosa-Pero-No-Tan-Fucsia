@@ -12,10 +12,13 @@ Esta función de Supabase crea la frontera privada del Bolsillo y de las tarjeta
 - Meta de ahorro.
 - Emisión, consulta y bloqueo de tarjetas NFC.
 - CORS por lista explícita de orígenes.
+- Depósitos presenciales en efectivo, transferencia o tarjeta.
+- Turno abierto obligatorio y atribución al operador.
+- Reversiones restringidas al administrador.
+- Resumen de movimientos del Bolsillo por cierre.
 
 ## No incluido todavía
 
-- Depósitos en efectivo, transferencia o tarjeta.
 - Consumos del saldo.
 - Pagos Bold y webhook.
 - Eliminación de contraseñas antiguas.
