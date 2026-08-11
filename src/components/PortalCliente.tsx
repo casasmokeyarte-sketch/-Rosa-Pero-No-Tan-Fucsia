@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import BolsilloCliente from './BolsilloCliente';
 import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
@@ -78,7 +79,7 @@ export default function PortalCliente({
 }: PortalClienteProps) {
   
   // Navigation
-  const [activeTab, setActiveTab] = useState<'pedido' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial'>('pedido');
+  const [activeTab, setActiveTab] = useState<'pedido' | 'bolsillo' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial'>('pedido');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
   // Sound and Alerter preferences state
@@ -256,24 +257,6 @@ export default function PortalCliente({
   const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
   const [paymentOption, setPaymentOption] = useState<'credit' | 'bold'>('credit');
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment'>('cart');
-  const [currentOrderNum, setCurrentOrderNum] = useState('');
-  const [integritySignature, setIntegritySignature] = useState('');
-  
-  // Bold Payment Modal states
-  const [showBoldModal, setShowBoldModal] = useState(false);
-  const [boldStep, setBoldStep] = useState<'select' | 'input' | 'processing' | 'success'>('select');
-  const [boldPaymentType, setBoldPaymentType] = useState<'card' | 'pse' | 'nequi_daviplata'>('card');
-  
-  // Form fields for Bold
-  const [boldCardNumber, setBoldCardNumber] = useState('');
-  const [boldCardHolder, setBoldCardHolder] = useState('');
-  const [boldCardExpiry, setBoldCardExpiry] = useState('');
-  const [boldCardCVV, setBoldCardCVV] = useState('');
-  const [boldPseBank, setBoldPseBank] = useState('Bancolombia');
-  const [boldPseEmail, setBoldPseEmail] = useState(client.email || '');
-  const [boldPseName, setBoldPseName] = useState(client.name || '');
-  const [boldPhoneWallet, setBoldPhoneWallet] = useState(client.phone || '');
-
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
   const blockReason = useMemo(() => getClientBillingBlockReason(client, invoices), [client, invoices]);
@@ -323,75 +306,6 @@ export default function PortalCliente({
   }, [client, cart, cartSubtotal]);
 
   const cartTotal = Math.max(0, cartSubtotal - clientDiscount) + cartTax + deliveryCost + cardFee;
-
-  // 1. Pre-generate order number when entering checkout step 3 (payment)
-  useEffect(() => {
-    if (checkoutStep === 'payment' && !currentOrderNum) {
-      setCurrentOrderNum(`WEB-${Math.floor(1000 + Math.random() * 9000)}`);
-    }
-  }, [checkoutStep, currentOrderNum]);
-
-  // 2. Compute SHA-256 integrity signature if secret key is present
-  useEffect(() => {
-    const computeHash = async () => {
-      const secret = import.meta.env.VITE_BOLD_INTEGRITY_SECRET;
-      if (!secret || !currentOrderNum) return;
-      
-      const amountInCop = Math.round(cartTotal).toString();
-      const rawString = currentOrderNum + amountInCop + 'COP' + secret;
-      
-      try {
-        const msgBuffer = new TextEncoder().encode(rawString);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        setIntegritySignature(hashHex);
-      } catch (err) {
-        console.error("Error computing integrity signature", err);
-      }
-    };
-    computeHash();
-  }, [currentOrderNum, cartTotal]);
-
-  // 3. Save pending checkout details in localStorage to handle redirect callbacks
-  useEffect(() => {
-    if (checkoutStep === 'payment' && currentOrderNum && cart.length > 0) {
-      const pendingOrder = {
-        orderNum: currentOrderNum,
-        cart: cart,
-        deliveryMethod: deliveryMethod,
-        deliveryAddress: deliveryAddress,
-        deliveryTransport: deliveryTransport,
-        client: client,
-        paymentOption: paymentOption
-      };
-      try {
-        localStorage.setItem('pending_bold_order', JSON.stringify(pendingOrder));
-      } catch (e) {
-        console.warn("Failed to save pending_bold_order to localStorage:", e);
-      }
-    }
-  }, [checkoutStep, currentOrderNum, cart, deliveryMethod, deliveryAddress, deliveryTransport, paymentOption]);
-
-  // 4. Listen to Bold iframe postMessage success events
-  useEffect(() => {
-    const handleBoldMessage = (event: MessageEvent) => {
-      if (event.origin !== 'https://checkout.bold.co') return;
-      try {
-        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (data && (data.type === 'success' || data.status === 'success' || data.event === 'success')) {
-          showToast("Pago recibido con éxito mediante pasarela Bold", "success");
-          submitInvoice('Bold', 'Pagado');
-        }
-      } catch (e) {
-        // Not JSON
-      }
-    };
-    window.addEventListener('message', handleBoldMessage);
-    return () => window.removeEventListener('message', handleBoldMessage);
-  }, [currentOrderNum, cartTotal]);
-
-  // Deleted redundant Bold restoration - now fully handled in App.tsx
 
   // Auto scroll chat to bottom with rendering yield
   useEffect(() => {
@@ -517,8 +431,11 @@ export default function PortalCliente({
       }
       submitInvoice('Crédito', 'Pendiente');
     } else {
-      setBoldStep('select');
-      setShowBoldModal(true);
+      showToast(
+        "Para pagos en línea seguros, agrega saldo desde la pestaña Bolsillo. El pedido solo se confirma después del webhook de Bold.",
+        "info"
+      );
+      setActiveTab('bolsillo');
     }
   };
 
@@ -810,6 +727,18 @@ export default function PortalCliente({
             </button>
 
             <button
+              onClick={() => setActiveTab('bolsillo')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                activeTab === 'bolsillo'
+                  ? 'bg-cyber-pink/20 text-cyber-pink border border-cyber-pink/30 shadow-md'
+                  : 'text-gray-400 hover:text-white hover:bg-slate-900/50 border border-transparent'
+              }`}
+            >
+              <span className="text-base">👛</span>
+              <span>MI BOLSILLO Y NFC</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('trayectoria')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeTab === 'trayectoria'
@@ -974,6 +903,11 @@ export default function PortalCliente({
 
         {/* CENTRAL PANEL PORTLET (lg:col-span-3) */}
         <div className="lg:col-span-3 space-y-6">
+
+          {/* SECURE WALLET VIEW */}
+          {activeTab === 'bolsillo' && (
+            <BolsilloCliente client={client} />
+          )}
           
           {/* ORDER ONLINE SUB-VIEW */}
           {activeTab === 'pedido' && (
@@ -1330,23 +1264,29 @@ export default function PortalCliente({
                           </div>
                         </div>
 
-                        {/* Real Bold Button loader or credit checkout buttons */}
+                        {/* Payments are confirmed only by server-side flows. */}
                         <div className="space-y-3 pt-2 border-t border-slate-800/80">
-                          {paymentOption === 'bold' && import.meta.env.VITE_BOLD_API_KEY ? (
-                            <div className="space-y-2">
-                              <RealBoldPaymentWrapper 
-                                apiKey={import.meta.env.VITE_BOLD_API_KEY}
-                                amount={cartTotal}
-                                orderId={currentOrderNum}
-                                integritySignature={integritySignature}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setCheckoutStep('shipping')}
-                                className="w-full py-2 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
-                              >
-                                Atrás
-                              </button>
+                          {paymentOption === 'bold' ? (
+                            <div className="space-y-3">
+                              <div className="bg-cyan-500/10 border border-cyan-500/25 p-3 rounded-xl text-[10px] text-cyan-100 leading-relaxed">
+                                El pago en línea del Bolsillo utiliza una intención creada por el servidor y confirmación mediante webhook. No se solicitan datos de tarjeta en esta página.
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setCheckoutStep('shipping')}
+                                  className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                                >
+                                  Atrás
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab('bolsillo')}
+                                  className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
+                                >
+                                  IR A MI BOLSILLO
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <div className="grid grid-cols-2 gap-2">
@@ -1361,16 +1301,13 @@ export default function PortalCliente({
                                 type="submit"
                                 className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
                               >
-                                {paymentOption === 'bold' ? 'PROBAR SIMULADOR BOLD' : 'CONFIRMAR Y DESPACHAR ORDEN'}
+                                CONFIRMAR Y DESPACHAR ORDEN
                               </button>
                             </div>
                           )}
-
-                          {paymentOption === 'bold' && !import.meta.env.VITE_BOLD_API_KEY && (
-                            <div className="bg-amber-400/5 border border-amber-400/20 p-2.5 rounded-xl text-[9px] text-amber-400 leading-normal font-sans">
-                              ⚠️ <strong>Nota:</strong> Se cargará el simulador de pasarela Bold. Para usar tu botón real, agrega <code className="bg-slate-950 px-1 py-0.5 rounded text-white text-[8px]">VITE_BOLD_API_KEY</code> en tu archivo <code className="bg-slate-950 px-1 py-0.5 rounded text-white text-[8px]">.env.local</code>.
-                            </div>
-                          )}
+                          <p className="text-[9px] text-amber-200/80 leading-relaxed">
+                            El saldo del Bolsillo no reemplaza validaciones legales, de identidad o de edad aplicables a una compra.
+                          </p>
                         </div>
                       </div>
                     )}
@@ -2238,428 +2175,8 @@ export default function PortalCliente({
         </div>
       )}
 
-      {/* Bold Payment Gateway Modal */}
-      {showBoldModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white text-slate-800 border-2 border-[#E82E3E]/60 rounded-3xl max-w-md w-full p-6 space-y-6 relative shadow-[0_0_50px_rgba(232,46,62,0.25)] font-sans">
-            
-            {/* Bold Brand Header */}
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="bg-[#E82E3E] text-white font-black px-3 py-1 rounded-xl text-lg tracking-tighter uppercase">
-                  bold.
-                </span>
-                <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Pago Seguro
-                </span>
-              </div>
-              {boldStep !== 'processing' && boldStep !== 'success' && (
-                <button 
-                  onClick={() => setShowBoldModal(false)}
-                  className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer text-sm p-1 rounded-full hover:bg-slate-50 border-none bg-transparent"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
 
-            {/* STEP 1: Select payment type or fill inputs */}
-            {boldStep === 'select' && (
-              <div className="space-y-4">
-                <div className="text-center">
-                  <span className="text-2xl font-black text-slate-900 font-mono">
-                    ${cartTotal.toLocaleString('es-CO')} COP
-                  </span>
-                </div>
 
-                <div className="space-y-2.5">
-                  <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                    Seleccione medio de pago:
-                  </label>
-                  
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setBoldPaymentType('card')}
-                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
-                        boldPaymentType === 'card' 
-                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
-                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-lg">💳</span>
-                      <span className="text-[9px] font-bold uppercase">Tarjeta</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setBoldPaymentType('pse')}
-                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
-                        boldPaymentType === 'pse' 
-                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
-                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-lg">🏦</span>
-                      <span className="text-[9px] font-bold uppercase">PSE</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setBoldPaymentType('nequi_daviplata')}
-                      className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 transition-all text-center cursor-pointer ${
-                        boldPaymentType === 'nequi_daviplata' 
-                          ? 'border-[#E82E3E] bg-[#E82E3E]/5 text-[#E82E3E]' 
-                          : 'border-slate-200 text-slate-500 hover:border-slate-350 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-lg">📱</span>
-                      <span className="text-[9px] font-bold uppercase">Nequi/D.Plata</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* FORM FIELDS */}
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
-                  {boldPaymentType === 'card' && (
-                    <div className="space-y-2 text-xs">
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Número de Tarjeta</label>
-                        <input
-                          type="text"
-                          value={boldCardNumber}
-                          onChange={e => setBoldCardNumber(e.target.value.replace(/\D/g, '').substring(0, 16))}
-                          placeholder="4111 2222 3333 4444"
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] font-mono"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Nombre del Tarjetahabiente</label>
-                        <input
-                          type="text"
-                          value={boldCardHolder}
-                          onChange={e => setBoldCardHolder(e.target.value)}
-                          placeholder="JHON DOE"
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] uppercase"
-                          required
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold uppercase">Expiración (MM/AA)</label>
-                          <input
-                            type="text"
-                            value={boldCardExpiry}
-                            onChange={e => {
-                              let val = e.target.value.replace(/\D/g, '');
-                              if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2, 4);
-                              setBoldCardExpiry(val);
-                            }}
-                            placeholder="12/29"
-                            maxLength={5}
-                            className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] text-center font-mono"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold uppercase">CVC / CVV</label>
-                          <input
-                            type="password"
-                            value={boldCardCVV}
-                            onChange={e => setBoldCardCVV(e.target.value.replace(/\D/g, '').substring(0, 4))}
-                            placeholder="***"
-                            className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] text-center font-mono"
-                            required
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {boldPaymentType === 'pse' && (
-                    <div className="space-y-2 text-xs">
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Seleccione Banco</label>
-                        <select
-                          value={boldPseBank}
-                          onChange={e => setBoldPseBank(e.target.value)}
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
-                        >
-                          <option value="Bancolombia">Bancolombia</option>
-                          <option value="Banco de Bogotá">Banco de Bogotá</option>
-                          <option value="Davivienda">Davivienda</option>
-                          <option value="Nequi">Nequi</option>
-                          <option value="Lulo Bank">Lulo Bank</option>
-                          <option value="Nu Colombia">Nu Colombia</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Nombre Completo Titular</label>
-                        <input
-                          type="text"
-                          value={boldPseName}
-                          onChange={e => setBoldPseName(e.target.value)}
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Correo Registrado en PSE</label>
-                        <input
-                          type="email"
-                          value={boldPseEmail}
-                          onChange={e => setBoldPseEmail(e.target.value)}
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E]"
-                          required
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {boldPaymentType === 'nequi_daviplata' && (
-                    <div className="space-y-2 text-xs">
-                      <div>
-                        <label className="block text-[9px] text-slate-400 font-bold uppercase">Número de Celular</label>
-                        <input
-                          type="text"
-                          value={boldPhoneWallet}
-                          onChange={e => setBoldPhoneWallet(e.target.value.replace(/\D/g, '').substring(0, 10))}
-                          placeholder="3001234567"
-                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl focus:outline-none focus:border-[#E82E3E] font-mono"
-                          required
-                        />
-                      </div>
-                      <p className="text-[9px] text-slate-400 leading-normal">
-                        Se enviará una notificación Push a su aplicación móvil para autorizar el débito en tiempo real.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBoldStep('processing');
-                    setTimeout(() => {
-                      setBoldStep('success');
-                      playTone(notifTone as any);
-                    }, 2500);
-                  }}
-                  className="w-full py-3 bg-[#E82E3E] hover:bg-[#c92433] text-white font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-[#E82E3E]/20 text-xs font-bold uppercase tracking-wider border-none"
-                >
-                  Pagar ${cartTotal.toLocaleString('es-CO')} COP
-                </button>
-              </div>
-            )}
-
-            {/* STEP 2: Processing Payment */}
-            {boldStep === 'processing' && (
-              <div className="py-12 flex flex-col items-center justify-center space-y-4">
-                <div className="w-12 h-12 border-4 border-[#E82E3E] border-t-transparent rounded-full animate-spin"></div>
-                <div className="text-center space-y-1">
-                  <h3 className="text-sm font-extrabold text-slate-800">PROCESANDO PAGO SEGURO BOLD</h3>
-                  <p className="text-[10px] text-slate-400">Verificando fondos y encriptando transacción en canal SSL...</p>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 3: Payment Success */}
-            {boldStep === 'success' && (
-              <div className="py-6 flex flex-col items-center justify-center space-y-5 text-center">
-                <div className="w-14 h-14 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center text-3xl font-extrabold border-2 border-emerald-500/30 animate-bounce">
-                  ✓
-                </div>
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-800 uppercase animate-pulse">¡Transacción Aprobada!</h3>
-                  <p className="text-xs text-emerald-600 font-bold">
-                    Pago de ${cartTotal.toLocaleString('es-CO')} COP exitoso
-                  </p>
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[9px] text-slate-500 font-mono space-y-0.5 text-left mt-2">
-                    <div><strong>ID Transacción:</strong> BOLD-TX-{Math.floor(100000 + Math.random() * 900000)}</div>
-                    <div><strong>Entidad Emisora:</strong> {boldPaymentType === 'card' ? 'Tarjeta Crédito/Débito' : (boldPaymentType === 'pse' ? boldPseBank : 'Monedero Digital')}</div>
-                    <div><strong>Código de Aut:</strong> B-{Math.floor(10000 + Math.random() * 90000)}</div>
-                    <div><strong>Fecha:</strong> {new Date().toLocaleString()}</div>
-                  </div>
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowBoldModal(false);
-                    submitInvoice('Bold', 'Pagado');
-                  }}
-                  className="w-full py-3 bg-[#E82E3E] hover:bg-[#c92433] text-white font-bold rounded-xl transition-all cursor-pointer text-xs uppercase tracking-wider font-bold border-none"
-                >
-                  Finalizar y Generar Pedido
-                </button>
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
-
-      {/* PRINT OVERLAY MODAL */}
-      {selectedInvoiceForPrint && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
-          <div className="bg-white text-black p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black">
-            {/* Header */}
-            <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
-              <h3 className="text-sm font-extrabold uppercase">ORDEN DE COMPRA / COMPROBANTE</h3>
-              <p className="text-[10px] font-bold">ROSA FUERTE LOGÍSTICA</p>
-              <p className="text-[9px]">Suministros Rosa Pero No Tan Fucsia</p>
-            </div>
-            
-            {/* Core Info */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1.5 font-bold">
-              <div className="flex justify-between font-bold">
-                <span>REMITO / COMPRA:</span>
-                <span>{selectedInvoiceForPrint.invoiceNumber}</span>
-              </div>
-              <div className="flex justify-between font-normal">
-                <span>FECHA REGISTRO:</span>
-                <span>{new Date(selectedInvoiceForPrint.createdAt).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>MODALIDAD ENVÍO:</span>
-                <span className="text-red-600">
-                  {selectedInvoiceForPrint.deliveryMethod === 'recoge' ? 'Retira en persona' : 'Envío programado'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>PAGO SOLICITADO:</span>
-                <span>{selectedInvoiceForPrint.paymentMethod}</span>
-              </div>
-              <div className="flex justify-between font-extrabold">
-                <span>ESTADO COMPRA:</span>
-                <span className="text-amber-700 font-bold">
-                  {selectedInvoiceForPrint.paymentStatus === 'Orden de Compra' ? 'ORDEN DE COMPRA (PRE-PEDIDO)' :
-                   selectedInvoiceForPrint.paymentStatus === 'Pendiente' ? 'APROBADA - PENDIENTE DE PAGO' :
-                   selectedInvoiceForPrint.paymentStatus.toUpperCase()}
-                </span>
-              </div>
-            </div>
-
-            {/* Client Info */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
-              <div className="font-bold">CLIENTE:</div>
-              <div className="uppercase font-bold">{selectedInvoiceForPrint.clientName}</div>
-              <div>RUT/NIT: {selectedInvoiceForPrint.clientRut}</div>
-              <div className="bg-slate-100 p-1.5 rounded mt-1 font-sans text-[9px] leading-relaxed">
-                📍 <strong>Dirección de entrega:</strong> {selectedInvoiceForPrint.guideAddress || 'Dirección Registrada'}
-              </div>
-            </div>
-
-            {/* Items Summary */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
-              <div className="font-bold">INSUMOS ADQUIRIDOS:</div>
-              <div className="space-y-1 border-t border-dashed border-black/20 pt-1.5 mt-1">
-                {selectedInvoiceForPrint.items.map((it, idx) => (
-                  <div key={idx} className="space-y-0.5">
-                    <div className="flex justify-between font-bold">
-                      <span>{it.productName} (x{it.quantity})</span>
-                      <span>${it.total.toLocaleString('es-CO')}</span>
-                    </div>
-                    {it.note && (
-                      <div className="text-[9px] text-gray-600 italic pl-2">
-                        * Nota: {it.note}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-between border-t border-dashed border-black pt-1.5 mt-2 text-sm font-bold">
-                <span>TOTAL LIQUIDADO:</span>
-                <span>${selectedInvoiceForPrint.total.toLocaleString('es-CO')} COP</span>
-              </div>
-            </div>
-
-            {/* Cuentas bancarias */}
-            {selectedInvoiceForPrint.paymentStatus === 'Pendiente' && (
-              <div className="py-3 border-b border-dashed border-black text-[9px] space-y-1 bg-slate-50 p-2 rounded">
-                <div className="font-bold text-center">CUENTAS HABILITADAS PARA TRANSFERENCIA:</div>
-                <ul className="list-disc pl-3 space-y-1">
-                  <li><strong>Bancolombia (Ahorros):</strong> 22500002534 (Oliver Torres)</li>
-                  <li><strong>Daviplata:</strong> 302 278 49 38 (Oliver Torres)</li>
-                  <li><strong>Bre-B:</strong> 3022784938 / @OLIVER915</li>
-                  <li><strong>PayPal / Tarjetas / Otros:</strong> Visa, MasterCard, Amex, Codensa</li>
-                </ul>
-              </div>
-            )}
-
-            {/* Signature Area */}
-            <div className="py-4 text-center space-y-1">
-              <div className="pt-8 border-b border-black w-2/3 mx-auto"></div>
-              <p className="text-[8px] uppercase tracking-wider text-gray-600">Soporte y Operaciones Rosa Fuerte</p>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2 mt-4 border-t border-slate-300 pt-4 no-print font-mono text-xs">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="flex-1 bg-black text-white hover:bg-slate-900 p-2 rounded-lg font-bold flex items-center justify-center gap-1.5 cursor-pointer border-none"
-              >
-                Imprimir
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedInvoiceForPrint(null)}
-                className="flex-1 bg-red-600 text-white hover:bg-red-700 p-2 rounded-lg font-bold flex items-center justify-center cursor-pointer border-none"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-interface RealBoldPaymentWrapperProps {
-  apiKey: string;
-  amount: number;
-  orderId: string;
-  integritySignature?: string;
-}
-
-function RealBoldPaymentWrapper({ apiKey, amount, orderId, integritySignature }: RealBoldPaymentWrapperProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Clear previous elements
-    containerRef.current.innerHTML = '';
-
-    // Create script tag
-    const script = document.createElement('script');
-    script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
-    script.async = true;
-    script.setAttribute('data-bold-button', 'dark-M');
-    script.setAttribute('data-api-key', apiKey);
-    script.setAttribute('data-amount', Math.round(amount).toString());
-    script.setAttribute('data-currency', 'COP');
-    script.setAttribute('data-order-id', orderId);
-    script.setAttribute('data-redirect-url', window.location.origin + window.location.pathname + '?bold_status=success');
-    
-    if (integritySignature) {
-      script.setAttribute('data-integrity-signature', integritySignature);
-    }
-
-    // Append script to container
-    containerRef.current.appendChild(script);
-  }, [apiKey, amount, orderId, integritySignature]);
-
-  return (
-    <div className="flex flex-col items-center justify-center p-3.5 bg-slate-950 border border-slate-900 rounded-xl space-y-2">
-      <span className="text-[9px] text-gray-500 font-mono">Pasarela Segura Bold activa</span>
-      <div ref={containerRef} className="flex justify-center w-full min-h-[40px]">
-        <span className="text-[9px] text-gray-400 font-mono animate-pulse">Invocando botón oficial de Bold...</span>
-      </div>
     </div>
   );
 }
