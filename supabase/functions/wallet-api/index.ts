@@ -502,6 +502,48 @@ async function handleAuthenticated(
     return response(origin, 200, { ok: true, wallet: await walletSummary(clientId) });
   }
 
+  if (req.method === "POST" && route === "/wallet/purchase") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+
+    const body = await parseJson(req);
+    const invoiceId = requiredString(body.invoice_id, "invoice_id", 120);
+    const invoiceNumber = requiredString(body.invoice_number, "invoice_number", 120);
+    const idempotencyKey = requiredString(body.idempotency_key, "idempotency_key", 160);
+    const walletAmount = requiredPositiveAmount(body.wallet_amount, "wallet_amount");
+    const deliveryFee = body.delivery_fee === null || body.delivery_fee === undefined
+      ? 0
+      : Number(body.delivery_fee);
+    if (!Number.isFinite(deliveryFee) || deliveryFee < 0 || deliveryFee > 500000) {
+      throw new Error("delivery_fee is outside the allowed range");
+    }
+    if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100) {
+      throw new Error("items must contain between 1 and 100 products");
+    }
+
+    const deliveryMethod = optionalString(body.delivery_method, 30) ?? "recoge";
+    if (!["oficina", "cliente", "recoge"].includes(deliveryMethod)) {
+      throw new Error("Unsupported delivery method");
+    }
+
+    const { data, error } = await admin.rpc("wallet_purchase_invoice", {
+      p_client_id: session.client_id,
+      p_invoice_id: invoiceId,
+      p_invoice_number: invoiceNumber,
+      p_items: body.items,
+      p_delivery_fee: deliveryFee,
+      p_delivery_method: deliveryMethod,
+      p_delivery_address: optionalString(body.delivery_address, 500),
+      p_wallet_amount: walletAmount,
+      p_idempotency_key: idempotencyKey,
+      p_session_id: session.id,
+    });
+    if (error) throw error;
+
+    return response(origin, 201, { ok: true, ...data });
+  }
+
   if (req.method === "POST" && route === "/wallet/topup-intent") {
     if (session.actor_type !== "client" || !session.client_id) {
       throw new Error("FORBIDDEN");
@@ -756,7 +798,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 3 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 4 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -782,6 +824,24 @@ Deno.serve(async (req) => {
       return response(origin, 503, {
         ok: false,
         error: "Las recargas en línea todavía no están configuradas.",
+      });
+    }
+    if (message === "WALLET_PRODUCT_NOT_ELIGIBLE") {
+      return response(origin, 409, {
+        ok: false,
+        error: "Uno o más productos todavía no están habilitados para pagar con el Bolsillo.",
+      });
+    }
+    if (message === "INVOICE_NOT_PAYABLE") {
+      return response(origin, 409, {
+        ok: false,
+        error: "La factura no está disponible para recibir pagos del Bolsillo.",
+      });
+    }
+    if (message.includes("Insufficient wallet balance")) {
+      return response(origin, 409, {
+        ok: false,
+        error: "Saldo insuficiente en el Bolsillo.",
       });
     }
     if (message.includes("Idempotency key was already used")) {
@@ -815,7 +875,14 @@ Deno.serve(async (req) => {
       message.includes("too large") ||
       message.includes("Invalid NFC UID") ||
       message.includes("Invalid transaction_id") ||
-      message.includes("Unsupported office top-up payment method")
+      message.includes("Unsupported office top-up payment method") ||
+      message.includes("Unsupported delivery method") ||
+      message.includes("items must contain") ||
+      message.includes("delivery_fee") ||
+      message.includes("wallet amount exceeds") ||
+      message.includes("Product not found") ||
+      message.includes("Invalid product quantity") ||
+      message.includes("Insufficient product stock")
     ) {
       return response(origin, 400, { ok: false, error: message });
     }

@@ -40,6 +40,7 @@ export interface Product {
   specialPriceQuarterG?: number; // Special price for exactly 0.25 Gr (1/4 Gr)
   userStocks?: { [userId: string]: number }; // Stock of each user
   note?: string; // Observación/Inconsistencia administrativa
+  walletEligible?: boolean; // Habilitación explícita para pagos con Bolsillo
 }
 
 export interface InvoiceItem {
@@ -83,6 +84,8 @@ export interface Invoice {
   guideAddress?: string;
   guideNotes?: string;
   cardFee?: number;
+  walletPaidAmount?: number;
+  amountDue?: number;
 }
 
 export interface Expense {
