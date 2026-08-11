@@ -1,44 +1,49 @@
-# Wallet API — fase privada inicial
+# Wallet API versión 3 — intención de recarga Bold
 
-Esta función de Supabase crea la frontera privada del Bolsillo y de las tarjetas NFC.
+Esta actualización crea la orden de recarga del Bolsillo en el servidor antes
+de abrir el checkout oficial de Bold.
 
-## Incluido
+## Seguridad del flujo
 
-- Login de operador y cliente con hashes bcrypt existentes.
-- Sesiones opacas almacenadas como hash.
-- Limitación básica de intentos de acceso.
-- Consulta del perfil, saldo e historial propio.
-- Consulta de clientes por operadores autenticados.
-- Meta de ahorro.
-- Emisión, consulta y bloqueo de tarjetas NFC.
-- CORS por lista explícita de orígenes.
-- Depósitos presenciales en efectivo, transferencia o tarjeta.
-- Turno abierto obligatorio y atribución al operador.
-- Reversiones restringidas al administrador.
-- Resumen de movimientos del Bolsillo por cierre.
+- Solo un cliente con sesión privada vigente puede crear una intención propia.
+- El monto se fija en pesos colombianos enteros, desde $1.000 COP.
+- Cada solicitud usa una clave de idempotencia y una referencia única.
+- La firma SHA-256 se genera en `wallet-api`; la llave secreta no llega al código
+  fuente ni al almacenamiento del navegador.
+- La redirección de Bold sirve únicamente para mostrar el estado pendiente.
+- Solo `bold-wallet-webhook`, tras validar la firma del evento, puede acreditar
+  dinero en el libro contable del Bolsillo.
+- El saldo del Bolsillo nunca sustituye los controles legales y de edad que
+  correspondan al producto comprado.
 
-## No incluido todavía
+## Rutas nuevas
 
-- Consumos del saldo.
-- Pagos Bold y webhook.
-- Eliminación de contraseñas antiguas.
+- `POST /wallet/topup-intent`
+  - Requiere sesión de cliente.
+  - Entrada: `amount` e `idempotency_key`.
+  - Devuelve los parámetros públicos del checkout y la firma generada.
+- `GET /wallet/topup-intent/status?order_reference=...`
+  - Requiere la misma sesión del cliente.
+  - Consulta el estado almacenado; no confía en parámetros de redirección.
 
-Las operaciones de dinero se activarán únicamente después de probar sesiones,
-roles y lectura NFC.
+## Secretos
 
-## Secretos requeridos
+Además de los secretos existentes, `wallet-api` requiere:
 
-Supabase proporciona `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` a la función.
-Se deben agregar estos secretos sin publicarlos en GitHub:
+- `BOLD_IDENTITY_KEY`: llave de identidad correspondiente al Botón de pagos.
+- `BOLD_WEBHOOK_SECRET`: llave secreta correspondiente a esa identidad; ya la
+  utiliza el webhook firmado.
+- `WALLET_BOLD_REDIRECT_URL`: URL HTTPS permitida a la que Bold puede regresar.
 
-- `WALLET_ALLOWED_ORIGINS`
-- `WALLET_SESSION_PEPPER`
-- `WALLET_NFC_PEPPER`
+Los valores se configuran únicamente en Supabase Edge Function Secrets.
 
-Los dos peppers deben ser diferentes y tener como mínimo 32 caracteres.
+## Instalación
 
-## Configuración
+1. Ejecutar `202608110002_wallet_bold_topup_intents.sql` en Supabase.
+2. Ejecutar `verify_wallet_bold_topup_intents.sql`.
+3. Agregar los secretos faltantes.
+4. actualizar la Edge Function `wallet-api` con `index.ts`.
+5. Confirmar que `/wallet-api/health` responde con versión 3.
 
-La función usa `verify_jwt = false` porque valida sus propios tokens opacos.
-Esto no significa que quede sin autenticación: todas las rutas privadas ejecutan
-`requireSession`. Solamente salud y login son públicas.
+La interfaz visual del Portal Cliente se integra en una fase posterior, después
+de comprobar esta frontera privada.

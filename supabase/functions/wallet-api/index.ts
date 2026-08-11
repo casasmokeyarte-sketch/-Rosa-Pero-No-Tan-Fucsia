@@ -23,11 +23,17 @@ const SESSION_HOURS_CLIENT = 24 * 7;
 const LOGIN_WINDOW_MINUTES = 15;
 const LOGIN_IDENTIFIER_LIMIT = 8;
 const LOGIN_IP_LIMIT = 20;
+const BOLD_MIN_AMOUNT_COP = 1_000;
+const BOLD_MAX_AMOUNT_COP = 50_000_000;
+const BOLD_INTENT_HOURS = 24;
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const sessionPepper = Deno.env.get("WALLET_SESSION_PEPPER") ?? "";
 const nfcPepper = Deno.env.get("WALLET_NFC_PEPPER") ?? "";
+const boldIdentityKey = Deno.env.get("BOLD_IDENTITY_KEY") ?? "";
+const boldSecretKey = Deno.env.get("BOLD_WEBHOOK_SECRET") ?? "";
+const boldRedirectUrl = Deno.env.get("WALLET_BOLD_REDIRECT_URL") ?? "";
 const allowedOrigins = new Set(
   (Deno.env.get("WALLET_ALLOWED_ORIGINS") ?? "")
     .split(",")
@@ -119,6 +125,33 @@ function requiredPositiveAmount(value: unknown, field: string): number {
     throw new Error(`${field} must be greater than zero`);
   }
   return Math.round(amount * 100) / 100;
+}
+
+function requiredBoldAmount(value: unknown): number {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(amount)) {
+    throw new Error("amount must be a whole number of COP");
+  }
+  if (amount < BOLD_MIN_AMOUNT_COP || amount > BOLD_MAX_AMOUNT_COP) {
+    throw new Error("amount is outside the Bold wallet range");
+  }
+  return amount;
+}
+
+function boldConfigurationReady(): boolean {
+  if (!boldIdentityKey || boldSecretKey.length < 16 || !boldRedirectUrl) return false;
+  try {
+    const redirect = new URL(boldRedirectUrl);
+    return redirect.protocol === "https:" && allowedOrigins.has(redirect.origin);
+  } catch {
+    return false;
+  }
+}
+
+function walletOrderReference(): string {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = bytesToHex(crypto.getRandomValues(new Uint8Array(8))).toUpperCase();
+  return `WAL-${timestamp}-${random}`;
 }
 
 async function parseJson(req: Request): Promise<Record<string, unknown>> {
@@ -469,6 +502,79 @@ async function handleAuthenticated(
     return response(origin, 200, { ok: true, wallet: await walletSummary(clientId) });
   }
 
+  if (req.method === "POST" && route === "/wallet/topup-intent") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    if (!boldConfigurationReady()) throw new Error("BOLD_NOT_CONFIGURED");
+
+    const body = await parseJson(req);
+    const amount = requiredBoldAmount(body.amount);
+    const idempotencyKey = requiredString(body.idempotency_key, "idempotency_key", 160);
+    const orderReference = walletOrderReference();
+    const expiresAt = new Date(Date.now() + BOLD_INTENT_HOURS * 3_600_000).toISOString();
+    const { data, error } = await admin.rpc("wallet_create_bold_topup_intent", {
+      p_client_id: session.client_id,
+      p_amount: amount,
+      p_idempotency_key: idempotencyKey,
+      p_order_reference: orderReference,
+      p_session_id: session.id,
+      p_expires_at: expiresAt,
+    });
+    if (error) throw error;
+
+    const intent = typeof data === "object" && data !== null
+      ? data as Record<string, unknown>
+      : null;
+    if (!intent) throw new Error("Failed to create Bold top-up intent");
+    const finalReference = requiredString(intent.order_reference, "order_reference", 60);
+    const finalAmount = requiredBoldAmount(intent.amount);
+    const integritySignature = await sha256Hex(
+      `${finalReference}${finalAmount}COP${boldSecretKey}`,
+    );
+
+    return response(origin, 201, {
+      ok: true,
+      intent: {
+        id: intent.id,
+        status: intent.status,
+        order_id: finalReference,
+        amount: finalAmount,
+        currency: "COP",
+        expires_at: intent.expires_at,
+      },
+      checkout: {
+        api_key: boldIdentityKey,
+        order_id: finalReference,
+        amount: String(finalAmount),
+        currency: "COP",
+        integrity_signature: integritySignature,
+        redirection_url: boldRedirectUrl,
+        description: "Recarga Bolsillo digital",
+      },
+    });
+  }
+
+  if (req.method === "GET" && route === "/wallet/topup-intent/status") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const orderReference = requiredString(
+      url.searchParams.get("order_reference"),
+      "order_reference",
+      60,
+    );
+    const { data, error } = await admin
+      .from("wallet_topup_intents")
+      .select("id,amount,currency,status,order_reference,expires_at,approved_at,created_at,updated_at")
+      .eq("client_id", session.client_id)
+      .eq("order_reference", orderReference)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return response(origin, 404, { ok: false, error: "Recarga no encontrada." });
+    return response(origin, 200, { ok: true, intent: data });
+  }
+
   if (req.method === "POST" && route === "/operator/topup") {
     requireOperator(session);
     const body = await parseJson(req);
@@ -650,7 +756,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 2 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 3 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -672,6 +778,21 @@ Deno.serve(async (req) => {
     if (message === "FORBIDDEN") {
       return response(origin, 403, { ok: false, error: "No tienes permiso para esta acción." });
     }
+    if (message === "BOLD_NOT_CONFIGURED") {
+      return response(origin, 503, {
+        ok: false,
+        error: "Las recargas en línea todavía no están configuradas.",
+      });
+    }
+    if (message.includes("Idempotency key was already used")) {
+      return response(origin, 409, { ok: false, error: message });
+    }
+    if (message.includes("Wallet account is not active")) {
+      return response(origin, 409, { ok: false, error: "El Bolsillo no está activo." });
+    }
+    if (message.includes("Wallet account not found")) {
+      return response(origin, 404, { ok: false, error: "Bolsillo no encontrado." });
+    }
     if (
       message === "OPEN_SHIFT_REQUIRED" ||
       message === "MULTIPLE_OPEN_SHIFTS" ||
@@ -688,6 +809,8 @@ Deno.serve(async (req) => {
       message.includes("too long") ||
       message.includes("greater than zero") ||
       message.includes("outside the allowed range") ||
+      message.includes("outside the Bold wallet range") ||
+      message.includes("whole number of COP") ||
       message.includes("JSON") ||
       message.includes("too large") ||
       message.includes("Invalid NFC UID") ||
