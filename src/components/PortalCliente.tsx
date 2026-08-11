@@ -264,6 +264,12 @@ export default function PortalCliente({
   const [walletCheckoutAmount, setWalletCheckoutAmount] = useState(0);
   const [walletCheckoutLoading, setWalletCheckoutLoading] = useState(false);
   const [walletCheckoutError, setWalletCheckoutError] = useState<string | null>(null);
+  const walletPurchaseAttemptRef = useRef<{
+    fingerprint: string;
+    invoiceId: string;
+    invoiceNumber: string;
+    idempotencyKey: string;
+  } | null>(null);
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
   const blockReason = useMemo(() => getClientBillingBlockReason(client, invoices), [client, invoices]);
@@ -485,13 +491,35 @@ export default function PortalCliente({
     setWalletCheckoutLoading(true);
     setWalletCheckoutError(null);
 
-    const invoiceId = `inv-client-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-    const invoiceNumber = `WEB-${Math.floor(100000 + Math.random() * 900000)}`;
+    const fingerprint = JSON.stringify({
+      clientId: client.id,
+      items: cart.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        note: item.note
+      })),
+      deliveryMethod,
+      deliveryAddress,
+      deliveryCost,
+      requestedAmount
+    });
+
+    let attempt = walletPurchaseAttemptRef.current;
+    if (!attempt || attempt.fingerprint !== fingerprint) {
+      const invoiceId = `inv-client-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+      attempt = {
+        fingerprint,
+        invoiceId,
+        invoiceNumber: `WEB-${Math.floor(100000 + Math.random() * 900000)}`,
+        idempotencyKey: `wallet-purchase-${invoiceId}-${crypto.randomUUID()}`
+      };
+      walletPurchaseAttemptRef.current = attempt;
+    }
 
     try {
       const result = await purchaseWithWallet(token, {
-        invoice_id: invoiceId,
-        invoice_number: invoiceNumber,
+        invoice_id: attempt.invoiceId,
+        invoice_number: attempt.invoiceNumber,
         items: cart.map((item) => ({
           productId: item.product.id,
           quantity: item.quantity,
@@ -501,7 +529,7 @@ export default function PortalCliente({
         delivery_method: deliveryMethod,
         delivery_address: deliveryAddress,
         wallet_amount: requestedAmount,
-        idempotency_key: `wallet-purchase-${invoiceId}-${crypto.randomUUID()}`
+        idempotency_key: attempt.idempotencyKey
       });
 
       const serverInvoice = result.invoice;
@@ -534,6 +562,7 @@ export default function PortalCliente({
       };
 
       onAddInvoice(newInvoice);
+      walletPurchaseAttemptRef.current = null;
       setCart([]);
       setCheckoutStep('cart');
       setWalletCheckoutBalance(
