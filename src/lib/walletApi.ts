@@ -79,6 +79,48 @@ export type BoldCheckout = {
   description: string;
 };
 
+export type WalletPurchaseInvoice = {
+  id: string;
+  invoice_number: string;
+  client_id: string;
+  client_name: string;
+  client_rut: string;
+  items: Array<{
+    productId: string;
+    productName: string;
+    price: number;
+    quantity: number;
+    taxAmount: number;
+    total: number;
+    unitType?: string;
+    note?: string;
+  }>;
+  subtotal: number;
+  discount: number;
+  tax_rate: number;
+  tax_amount: number;
+  total: number;
+  wallet_paid_amount: number;
+  amount_due: number;
+  payment_method: string;
+  payment_status: 'Pagado' | 'Pendiente' | string;
+  due_date: string;
+  cashier_name: string;
+  is_delivery: boolean;
+  delivery_fee: number;
+  delivery_status: string;
+  delivery_address: string | null;
+  delivery_method: 'oficina' | 'cliente' | 'recoge';
+  created_at: string;
+};
+
+export type WalletPurchaseResult = {
+  ok: true;
+  invoice: WalletPurchaseInvoice;
+  transaction: WalletTransaction;
+  idempotent_replay: boolean;
+};
+
 export type TopupIntent = {
   id: string;
   status: string;
@@ -192,6 +234,26 @@ export async function fetchWalletTransactions(
     `/transactions?${params.toString()}`,
     { token }
   );
+}
+
+export async function purchaseWithWallet(
+  token: string,
+  input: {
+    invoice_id: string;
+    invoice_number: string;
+    items: Array<{ productId: string; quantity: number; note?: string }>;
+    delivery_fee: number;
+    delivery_method: 'oficina' | 'cliente' | 'recoge';
+    delivery_address?: string;
+    wallet_amount: number;
+    idempotency_key: string;
+  }
+) {
+  return walletRequest<WalletPurchaseResult>('/wallet/purchase', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(input)
+  });
 }
 
 export async function createWalletTopupIntent(

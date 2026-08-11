@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import BolsilloCliente from './BolsilloCliente';
+import AyudaCliente from './AyudaCliente';
+import { fetchWallet, getWalletSession, purchaseWithWallet } from '../lib/walletApi';
 import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
@@ -30,7 +32,8 @@ import {
   Fingerprint,
   Printer,
   FileText,
-  Calendar
+  Calendar,
+  CircleHelp
 } from 'lucide-react';
 import AtomBubble from './AtomBubble';
 
@@ -79,7 +82,7 @@ export default function PortalCliente({
 }: PortalClienteProps) {
   
   // Navigation
-  const [activeTab, setActiveTab] = useState<'pedido' | 'bolsillo' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial'>('pedido');
+  const [activeTab, setActiveTab] = useState<'pedido' | 'bolsillo' | 'trayectoria' | 'catalogo' | 'chat' | 'solicitudes' | 'configuracion' | 'historial' | 'ayuda'>('pedido');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
   // Sound and Alerter preferences state
@@ -245,7 +248,7 @@ export default function PortalCliente({
   const [dangerConfirm, setDangerConfirm] = useState('');
 
   // Order Cart state
-  const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
+  const [cart, setCart] = useState<{ product: Product; quantity: number; note: string }[]>([]);
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
   
   // Delivery config for the online order
@@ -255,8 +258,12 @@ export default function PortalCliente({
 
   // Delivery and Payment configurations
   const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
-  const [paymentOption, setPaymentOption] = useState<'credit' | 'bold'>('credit');
+  const [paymentOption, setPaymentOption] = useState<'credit' | 'bold' | 'wallet'>('credit');
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'shipping' | 'payment'>('cart');
+  const [walletCheckoutBalance, setWalletCheckoutBalance] = useState<number | null>(null);
+  const [walletCheckoutAmount, setWalletCheckoutAmount] = useState(0);
+  const [walletCheckoutLoading, setWalletCheckoutLoading] = useState(false);
+  const [walletCheckoutError, setWalletCheckoutError] = useState<string | null>(null);
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
   const blockReason = useMemo(() => getClientBillingBlockReason(client, invoices), [client, invoices]);
@@ -306,6 +313,37 @@ export default function PortalCliente({
   }, [client, cart, cartSubtotal]);
 
   const cartTotal = Math.max(0, cartSubtotal - clientDiscount) + cartTax + deliveryCost + cardFee;
+
+  const prepareWalletCheckout = async () => {
+    setPaymentOption('wallet');
+    setWalletCheckoutError(null);
+    const token = getWalletSession(client.id);
+
+    if (!token) {
+      setWalletCheckoutBalance(null);
+      setWalletCheckoutAmount(0);
+      setWalletCheckoutError(
+        'Primero inicia la sesión segura en Mi Bolsillo y luego regresa al carrito.'
+      );
+      return;
+    }
+
+    setWalletCheckoutLoading(true);
+    try {
+      const result = await fetchWallet(token);
+      const balance = Number(result.wallet.balance || 0);
+      setWalletCheckoutBalance(balance);
+      setWalletCheckoutAmount(Math.min(balance, cartTotal));
+    } catch (error) {
+      setWalletCheckoutBalance(null);
+      setWalletCheckoutAmount(0);
+      setWalletCheckoutError(
+        error instanceof Error ? error.message : 'No fue posible consultar el saldo.'
+      );
+    } finally {
+      setWalletCheckoutLoading(false);
+    }
+  };
 
   // Auto scroll chat to bottom with rendering yield
   useEffect(() => {
@@ -418,10 +456,124 @@ export default function PortalCliente({
     }, 4500);
   };
 
+  const submitWalletPurchase = async () => {
+    const token = getWalletSession(client.id);
+    if (!token) {
+      setWalletCheckoutError('Primero inicia la sesión segura en Mi Bolsillo.');
+      return;
+    }
+
+    const ineligibleProducts = cart.filter((item) => item.product.walletEligible !== true);
+    if (ineligibleProducts.length > 0) {
+      setWalletCheckoutError(
+        'Uno o más productos todavía no están habilitados para pagar con el Bolsillo.'
+      );
+      return;
+    }
+
+    const requestedAmount = Math.round(Number(walletCheckoutAmount) * 100) / 100;
+    const available = walletCheckoutBalance ?? 0;
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      setWalletCheckoutError('Escribe un monto mayor que cero.');
+      return;
+    }
+    if (requestedAmount > cartTotal || requestedAmount > available) {
+      setWalletCheckoutError('El monto no puede superar el total ni el saldo disponible.');
+      return;
+    }
+
+    setWalletCheckoutLoading(true);
+    setWalletCheckoutError(null);
+
+    const invoiceId = `inv-client-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    const invoiceNumber = `WEB-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    try {
+      const result = await purchaseWithWallet(token, {
+        invoice_id: invoiceId,
+        invoice_number: invoiceNumber,
+        items: cart.map((item) => ({
+          productId: item.product.id,
+          quantity: item.quantity,
+          note: item.note
+        })),
+        delivery_fee: deliveryCost,
+        delivery_method: deliveryMethod,
+        delivery_address: deliveryAddress,
+        wallet_amount: requestedAmount,
+        idempotency_key: `wallet-purchase-${invoiceId}-${crypto.randomUUID()}`
+      });
+
+      const serverInvoice = result.invoice;
+      const newInvoice: Invoice = {
+        id: serverInvoice.id,
+        invoiceNumber: serverInvoice.invoice_number,
+        clientId: serverInvoice.client_id,
+        clientName: serverInvoice.client_name,
+        clientRut: serverInvoice.client_rut,
+        items: serverInvoice.items as InvoiceItem[],
+        subtotal: Number(serverInvoice.subtotal),
+        discount: Number(serverInvoice.discount),
+        taxRate: Number(serverInvoice.tax_rate),
+        taxAmount: Number(serverInvoice.tax_amount),
+        total: Number(serverInvoice.total),
+        paymentMethod: serverInvoice.payment_method,
+        paymentStatus: serverInvoice.payment_status as Invoice['paymentStatus'],
+        dueDate: serverInvoice.due_date,
+        createdAt: serverInvoice.created_at,
+        cashierName: serverInvoice.cashier_name,
+        isDelivery: serverInvoice.is_delivery,
+        deliveryFee: Number(serverInvoice.delivery_fee || 0),
+        deliveryRider: deliveryMethod === 'recoge' ? 'N/A' : deliveryRider,
+        deliveryTransport: deliveryMethod === 'recoge' ? 'N/A' : deliveryTransport,
+        deliveryStatus: 'Pendiente',
+        deliveryMethod,
+        guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress,
+        walletPaidAmount: Number(serverInvoice.wallet_paid_amount),
+        amountDue: Number(serverInvoice.amount_due)
+      };
+
+      onAddInvoice(newInvoice);
+      setCart([]);
+      setCheckoutStep('cart');
+      setWalletCheckoutBalance(
+        Math.max(0, available - Number(result.transaction.amount || requestedAmount))
+      );
+
+      const remaining = Number(serverInvoice.amount_due || 0);
+      const message = remaining === 0
+        ? `Pedido #${serverInvoice.invoice_number} pagado completamente con el Bolsillo.`
+        : `Se aplicaron ${requestedAmount.toLocaleString('es-CO')} COP al pedido #${serverInvoice.invoice_number}. Quedan ${remaining.toLocaleString('es-CO')} COP pendientes.`;
+
+      setOrderSuccess(message);
+      showToast(message, remaining === 0 ? 'success' : 'info');
+
+      onSendMessage(
+        client.id,
+        `[BOLSILLO]: Pedido #${serverInvoice.invoice_number}. Aplicado: ${requestedAmount.toLocaleString('es-CO')} COP. Pendiente: ${remaining.toLocaleString('es-CO')} COP.`,
+        'agent',
+        'Asistente Digital'
+      );
+
+      setTimeout(() => {
+        setOrderSuccess(null);
+        setActiveTab('historial');
+      }, 5000);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'No fue posible aplicar el saldo del Bolsillo.';
+      setWalletCheckoutError(message);
+      showToast(message, 'error');
+    } finally {
+      setWalletCheckoutLoading(false);
+    }
+  };
+
   // Submit client online order checkout
-  const handleCheckoutSubmit = (e: React.FormEvent) => {
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    if (cart.length === 0 || walletCheckoutLoading) return;
 
     if (paymentOption === 'credit') {
       const availableCredit = client.creditLimit - client.outstandingBalance;
@@ -430,13 +582,19 @@ export default function PortalCliente({
         return;
       }
       submitInvoice('Crédito', 'Pendiente');
-    } else {
-      showToast(
-        "Para pagos en línea seguros, agrega saldo desde la pestaña Bolsillo. El pedido solo se confirma después del webhook de Bold.",
-        "info"
-      );
-      setActiveTab('bolsillo');
+      return;
     }
+
+    if (paymentOption === 'wallet') {
+      await submitWalletPurchase();
+      return;
+    }
+
+    showToast(
+      "Para pagos en línea seguros, agrega saldo desde Mi Bolsillo. La recarga solo se confirma mediante el webhook firmado de Bold.",
+      "info"
+    );
+    setActiveTab('bolsillo');
   };
 
   // Send message chat simulation
@@ -807,6 +965,18 @@ export default function PortalCliente({
             </button>
 
             <button
+              onClick={() => setActiveTab('ayuda')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                activeTab === 'ayuda'
+                  ? 'bg-cyan-400/20 text-cyan-300 border border-cyan-400/30 shadow-md'
+                  : 'text-gray-400 hover:text-white hover:bg-slate-900/50 border border-transparent'
+              }`}
+            >
+              <CircleHelp size={15} />
+              <span>CÓMO USAR LA APP</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('configuracion')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeTab === 'configuracion'
@@ -903,6 +1073,11 @@ export default function PortalCliente({
 
         {/* CENTRAL PANEL PORTLET (lg:col-span-3) */}
         <div className="lg:col-span-3 space-y-6">
+
+          {/* CLIENT HELP CENTER */}
+          {activeTab === 'ayuda' && (
+            <AyudaCliente onNavigate={setActiveTab} />
+          )}
 
           {/* SECURE WALLET VIEW */}
           {activeTab === 'bolsillo' && (
@@ -1203,7 +1378,7 @@ export default function PortalCliente({
                             <span>💳</span> Pasarela de Pago
                           </h4>
                           
-                          <div className="grid grid-cols-2 gap-1.5">
+                          <div className="grid grid-cols-3 gap-1.5">
                             <button
                               type="button"
                               onClick={() => setPaymentOption('credit')}
@@ -1226,12 +1401,78 @@ export default function PortalCliente({
                             >
                               Pago Bold
                             </button>
+                            <button
+                              type="button"
+                              onClick={prepareWalletCheckout}
+                              className={`py-2 rounded-lg border text-[10px] font-bold transition-all text-center cursor-pointer uppercase ${
+                                paymentOption === 'wallet'
+                                  ? 'bg-cyan-400/20 border-cyan-400 text-cyan-200'
+                                  : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              Mi Bolsillo
+                            </button>
                           </div>
 
                           {paymentOption === 'credit' && (
                             <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 text-[10px] font-mono flex justify-between">
                               <span className="text-gray-500">Cupo Disponible:</span>
                               <span className="text-white font-bold">${(client.creditLimit - client.outstandingBalance).toLocaleString('es-CO')} COP</span>
+                            </div>
+                          )}
+
+                          {paymentOption === 'wallet' && (
+                            <div className="space-y-2">
+                              <div className="bg-cyan-500/10 border border-cyan-500/25 p-3 rounded-xl space-y-2">
+                                <div className="flex justify-between text-[10px] font-mono">
+                                  <span className="text-cyan-100">Saldo disponible:</span>
+                                  <span className="font-bold text-white">
+                                    {walletCheckoutBalance === null
+                                      ? 'Sesión pendiente'
+                                      : `${walletCheckoutBalance.toLocaleString('es-CO')} COP`}
+                                  </span>
+                                </div>
+                                {walletCheckoutBalance !== null && (
+                                  <>
+                                    <label className="block text-[9px] text-gray-300 uppercase tracking-wider">
+                                      Monto que deseas aplicar
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      step="0.01"
+                                      max={Math.min(walletCheckoutBalance, cartTotal)}
+                                      value={walletCheckoutAmount || ''}
+                                      onChange={(event) =>
+                                        setWalletCheckoutAmount(Number(event.target.value))
+                                      }
+                                      className="w-full bg-slate-950 border border-cyan-400/30 rounded-lg p-2 text-white text-xs font-mono focus:outline-none focus:border-cyan-300"
+                                    />
+                                    <div className="flex justify-between text-[10px] font-mono">
+                                      <span className="text-gray-400">Quedaría pendiente:</span>
+                                      <span className="font-bold text-amber-200">
+                                        ${Math.max(0, cartTotal - Number(walletCheckoutAmount || 0)).toLocaleString('es-CO')} COP
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+
+                              {walletCheckoutError && (
+                                <div className="bg-red-500/10 border border-red-500/25 text-red-200 p-2.5 rounded-lg text-[10px] leading-relaxed">
+                                  {walletCheckoutError}
+                                </div>
+                              )}
+
+                              {!getWalletSession(client.id) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab('bolsillo')}
+                                  className="w-full py-2 rounded-lg border border-cyan-400/30 text-cyan-200 text-[10px] font-bold"
+                                >
+                                  INICIAR SESIÓN EN MI BOLSILLO
+                                </button>
+                              )}
                             </div>
                           )}
 
@@ -1299,9 +1540,20 @@ export default function PortalCliente({
                               </button>
                               <button
                                 type="submit"
-                                className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
+                                disabled={
+                                  walletCheckoutLoading ||
+                                  (paymentOption === 'wallet' && (
+                                    walletCheckoutBalance === null ||
+                                    walletCheckoutAmount <= 0
+                                  ))
+                                }
+                                className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink disabled:opacity-40 disabled:cursor-not-allowed"
                               >
-                                CONFIRMAR Y DESPACHAR ORDEN
+                                {walletCheckoutLoading
+                                  ? 'PROCESANDO...'
+                                  : paymentOption === 'wallet'
+                                  ? 'APLICAR SALDO AL PEDIDO'
+                                  : 'CONFIRMAR Y DESPACHAR ORDEN'}
                               </button>
                             </div>
                           )}
