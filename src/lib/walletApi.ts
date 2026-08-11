@@ -6,6 +6,7 @@ export const WALLET_API_URL = (
 ).replace(/\/$/, '');
 
 const sessionKey = (clientId: string) => `wallet_session_${clientId}`;
+const operatorSessionKey = (userId: string) => `wallet_operator_session_${userId}`;
 
 export type WalletSummary = {
   wallet_account_id: string;
@@ -40,6 +41,32 @@ export type WalletTransaction = {
   notes: string | null;
   created_at: string;
   reversal_of: string | null;
+};
+
+export type WalletShiftSummary = {
+  shift_id: string;
+  operator_name?: string;
+  shift_status?: string;
+  movement_count: number;
+  cash_topups: number;
+  transfer_topups: number;
+  card_topups: number;
+  wallet_purchases: number;
+  ledger_credits: number;
+  ledger_debits: number;
+};
+
+export type WalletLookupResult = {
+  ok: true;
+  card: WalletCard & { client_id: string };
+  client: {
+    id: string;
+    name: string;
+    rut: string;
+    email: string;
+    phone: string;
+  } | null;
+  wallet: WalletSummary | null;
 };
 
 export type BoldCheckout = {
@@ -104,6 +131,30 @@ export function clearWalletSession(clientId: string): void {
   sessionStorage.removeItem(sessionKey(clientId));
 }
 
+export function getWalletOperatorSession(userId: string): string | null {
+  return sessionStorage.getItem(operatorSessionKey(userId));
+}
+
+export function saveWalletOperatorSession(userId: string, token: string): void {
+  sessionStorage.setItem(operatorSessionKey(userId), token);
+}
+
+export function clearWalletOperatorSession(userId: string): void {
+  sessionStorage.removeItem(operatorSessionKey(userId));
+}
+
+export async function loginWalletOperator(username: string, password: string) {
+  return walletRequest<{
+    ok: true;
+    token: string;
+    expires_at: string;
+    actor: { id: string; name: string; role: string; type: 'operator' };
+  }>('/login/operator', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
+  });
+}
+
 export async function loginWalletClient(code: string, password: string) {
   return walletRequest<{
     ok: true;
@@ -120,16 +171,25 @@ export async function logoutWalletClient(token: string): Promise<void> {
   await walletRequest('/logout', { method: 'POST', token });
 }
 
-export async function fetchWallet(token: string) {
+export async function fetchWallet(token: string, clientId?: string) {
+  const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
   return walletRequest<{ ok: true; wallet: WalletSummary; cards: WalletCard[] }>(
-    '/wallet',
+    `/wallet${query}`,
     { token }
   );
 }
 
-export async function fetchWalletTransactions(token: string, limit = 50) {
+export async function fetchWalletTransactions(
+  token: string,
+  limit = 50,
+  clientId?: string
+) {
+  const params = new URLSearchParams({
+    limit: String(Math.max(1, Math.min(100, limit)))
+  });
+  if (clientId) params.set('client_id', clientId);
   return walletRequest<{ ok: true; transactions: WalletTransaction[] }>(
-    `/transactions?limit=${Math.max(1, Math.min(100, limit))}`,
+    `/transactions?${params.toString()}`,
     { token }
   );
 }
@@ -157,5 +217,79 @@ export async function fetchWalletTopupStatus(token: string, orderReference: stri
   return walletRequest<{ ok: true; intent: TopupIntent }>(
     `/wallet/topup-intent/status?order_reference=${encodeURIComponent(orderReference)}`,
     { token }
+  );
+}
+
+export async function createOperatorWalletTopup(
+  token: string,
+  input: {
+    client_id: string;
+    amount: number;
+    payment_method: 'cash' | 'transfer' | 'card';
+    idempotency_key: string;
+    notes?: string;
+  }
+) {
+  return walletRequest<{ ok: true; transaction: unknown; shift: { id: string } }>(
+    '/operator/topup',
+    { method: 'POST', token, body: JSON.stringify(input) }
+  );
+}
+
+export async function reverseOperatorWalletTransaction(
+  token: string,
+  input: {
+    transaction_id: string;
+    idempotency_key: string;
+    notes: string;
+  }
+) {
+  return walletRequest<{ ok: true; transaction: unknown; shift: { id: string } }>(
+    '/operator/reverse',
+    { method: 'POST', token, body: JSON.stringify(input) }
+  );
+}
+
+export async function fetchWalletShiftSummary(token: string, shiftId?: string) {
+  const query = shiftId ? `?shift_id=${encodeURIComponent(shiftId)}` : '';
+  return walletRequest<{ ok: true; summary: WalletShiftSummary }>(
+    `/shift/summary${query}`,
+    { token }
+  );
+}
+
+export async function lookupWalletNfc(
+  token: string,
+  input: { uid?: string; public_token?: string }
+) {
+  return walletRequest<WalletLookupResult>('/nfc/lookup', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(input)
+  });
+}
+
+export async function issueWalletNfc(
+  token: string,
+  input: { client_id: string; uid?: string; label?: string }
+) {
+  return walletRequest<{
+    ok: true;
+    card: WalletCard & { client_id: string; public_token: string };
+  }>('/nfc/issue', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(input)
+  });
+}
+
+export async function blockWalletNfc(token: string, cardId: string) {
+  return walletRequest<{ ok: true; card: WalletCard & { client_id: string } }>(
+    '/nfc/block',
+    {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ card_id: cardId })
+    }
   );
 }
