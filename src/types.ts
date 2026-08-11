@@ -189,6 +189,7 @@ export interface UserPermissions {
   compras_web?: boolean;
   domicilios: boolean;
   clientes: boolean;
+  wallet?: boolean;
   inventario: boolean;
   caja: boolean;
   historial_cierres: boolean;
@@ -345,5 +346,3 @@ export function getClientBillingBlockReason(client: Client, invoices: Invoice[])
   
   return null;
 }
-
-

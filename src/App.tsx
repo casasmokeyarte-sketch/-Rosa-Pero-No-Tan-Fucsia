@@ -35,6 +35,7 @@ import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toC
 import Dashboard from './components/Dashboard';
 import Facturacion from './components/Facturacion';
 import Clientes from './components/Clientes';
+import WalletOperadorAdmin from './components/WalletOperadorAdmin';
 import Inventario from './components/Inventario';
 import CajaJornada from './components/CajaJornada';
 import Cartera from './components/Cartera';
@@ -98,6 +99,7 @@ export function getUserPermissions(user: User): UserPermissions {
     compras_web: true,
     domicilios: true,
     clientes: true,
+    wallet: true,
     inventario: true,
     caja: true,
     historial_cierres: isDocAdmin,
@@ -2686,6 +2688,7 @@ export default function App() {
     { id: 'historial_facturas', label: 'Historial de Facturas', icon: FileText, color: 'text-cyber-pink' },
     { id: 'domicilios', label: 'Domicilios / Mensajería', icon: Truck, color: 'text-cyber-pink' },
     { id: 'clientes', label: 'Clientes', icon: Users, color: 'text-cyber-pink', shortcut: 'Ctrl+C' },
+    { id: 'wallet', label: 'Bolsillos y NFC', icon: Fingerprint, color: 'text-cyber-green' },
     { id: 'inventario', label: 'Inventario de Insumos', icon: Package, color: 'text-cyber-blue', shortcut: 'Ctrl+P' },
     { id: 'caja', label: 'Apertura / Cierre Caja', icon: Key, color: 'text-cyber-green', shortcut: 'Ctrl+A' },
     { id: 'historial_cierres', label: 'Historial de Cierres', icon: FileText, color: 'text-cyber-pink' },
@@ -3662,6 +3665,14 @@ export default function App() {
               onUpdateClient={handleUpdateClient}
               onDeleteClient={handleDeleteClient}
               onImportClients={handleImportClients}
+            />
+          )}
+
+          {activeTab === 'wallet' && getUserPermissions(currentUser).wallet !== false && (
+            <WalletOperadorAdmin
+              currentUser={currentUser}
+              clients={clients}
+              showToast={showToast}
             />
           )}
 
