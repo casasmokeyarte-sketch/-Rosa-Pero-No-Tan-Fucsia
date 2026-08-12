@@ -26,6 +26,26 @@ const LOGIN_IP_LIMIT = 20;
 const BOLD_MIN_AMOUNT_COP = 1_000;
 const BOLD_MAX_AMOUNT_COP = 50_000_000;
 const BOLD_INTENT_HOURS = 24;
+const RESTRICTED_PRODUCT_TERMS = [
+  "tabaco",
+  "nicotina",
+  "cigarr",
+  "vape",
+  "vaporiz",
+  "bong",
+  "pipa",
+  "cannabis",
+  "marihuana",
+  "weed",
+  "blunt",
+  "papel fumar",
+  "encendedor",
+  "tatuaje",
+  "tattoo",
+  "piercing",
+  "aguja",
+  "tinta tatuar",
+];
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -117,6 +137,21 @@ function normalizeUid(value: string): string {
     throw new Error("Invalid NFC UID");
   }
   return normalized;
+}
+
+function normalizedProductText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isAutomaticallyRestrictedProduct(product: {
+  name?: unknown;
+  category?: unknown;
+}): boolean {
+  const text = normalizedProductText(`${product.name ?? ""} ${product.category ?? ""}`);
+  return RESTRICTED_PRODUCT_TERMS.some((term) => text.includes(term));
 }
 
 function requiredPositiveAmount(value: unknown, field: string): number {
@@ -454,6 +489,76 @@ async function handleAuthenticated(
     });
   }
 
+  if (req.method === "GET" && route === "/products/wallet-eligibility") {
+    requireAdministrator(session);
+    const { data, error } = await admin
+      .from("products")
+      .select(
+        "id,code,name,category,wallet_eligible,wallet_eligibility_status,wallet_eligibility_note,wallet_eligibility_reviewed_at",
+      )
+      .order("name", { ascending: true });
+    if (error) throw error;
+    const products = (data ?? []).map((product) => ({
+      ...product,
+      automatically_restricted: isAutomaticallyRestrictedProduct(product),
+    }));
+    return response(origin, 200, { ok: true, products });
+  }
+
+  if (req.method === "PATCH" && route === "/products/wallet-eligibility") {
+    requireAdministrator(session);
+    const body = await parseJson(req);
+    const productId = requiredString(body.product_id, "product_id", 120);
+    if (typeof body.eligible !== "boolean") {
+      throw new Error("eligible must be boolean");
+    }
+    const eligible = body.eligible;
+    const reviewNote = requiredString(body.review_note, "review_note", 500);
+    if (reviewNote.length < 10) {
+      throw new Error("review_note must contain at least 10 characters");
+    }
+
+    const { data: currentProduct, error: fetchError } = await admin
+      .from("products")
+      .select("id,code,name,category,wallet_eligible")
+      .eq("id", productId)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!currentProduct) {
+      return response(origin, 404, { ok: false, error: "Producto no encontrado." });
+    }
+    const automaticallyRestricted = isAutomaticallyRestrictedProduct(currentProduct);
+    if (eligible && automaticallyRestricted) {
+      return response(origin, 409, {
+        ok: false,
+        error: "Este producto fue identificado como restringido y no puede habilitarse para pagos con Bolsillo.",
+      });
+    }
+
+    const { data: updatedProduct, error: updateError } = await admin.rpc(
+      "set_wallet_product_eligibility",
+      {
+        p_product_id: productId,
+        p_eligible: eligible,
+        p_review_note: reviewNote,
+        p_reviewed_by_user_id: session.user_id,
+        p_metadata: {
+          automatically_restricted: automaticallyRestricted,
+          api_version: 5,
+        },
+      },
+    );
+    if (updateError) throw updateError;
+
+    return response(origin, 200, {
+      ok: true,
+      product: {
+        ...updatedProduct,
+        automatically_restricted: automaticallyRestricted,
+      },
+    });
+  }
+
   if (req.method === "GET" && route === "/wallet") {
     const clientId = clientIdForRequest(session, url);
     const wallet = await walletSummary(clientId);
@@ -461,7 +566,7 @@ async function handleAuthenticated(
 
     const { data: cards, error } = await admin
       .from("nfc_cards")
-      .select("id,status,label,issued_at,last_seen_at")
+      .select("id,public_token,status,label,issued_at,last_seen_at")
       .eq("client_id", clientId)
       .order("issued_at", { ascending: false });
     if (error) throw error;
@@ -707,7 +812,7 @@ async function handleAuthenticated(
 
     let query = admin
       .from("nfc_cards")
-      .select("id,client_id,status,label,issued_at,last_seen_at");
+      .select("id,client_id,public_token,status,label,issued_at,last_seen_at");
     query = publicToken
       ? query.eq("public_token", publicToken)
       : query.eq("uid_hash", await sha256Hex(`${normalizeUid(uid!)}:${nfcPepper}`));
@@ -732,17 +837,17 @@ async function handleAuthenticated(
   }
 
   if (req.method === "POST" && route === "/nfc/issue") {
-    requireOperator(session);
+    requireAdministrator(session);
     const body = await parseJson(req);
     const clientId = requiredString(body.client_id, "client_id", 120);
-    const uid = optionalString(body.uid, 200);
+    const uid = requiredString(body.uid, "uid", 200);
     const label = optionalString(body.label, 120);
     const record: Record<string, unknown> = {
       client_id: clientId,
       label,
       issued_by_user_id: session.user_id,
     };
-    if (uid) record.uid_hash = await sha256Hex(`${normalizeUid(uid)}:${nfcPepper}`);
+    record.uid_hash = await sha256Hex(`${normalizeUid(uid)}:${nfcPepper}`);
 
     const { data, error } = await admin
       .from("nfc_cards")
@@ -798,7 +903,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 4 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 5 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
