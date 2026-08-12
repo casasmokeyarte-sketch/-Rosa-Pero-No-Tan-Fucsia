@@ -22,10 +22,23 @@ export type WalletSummary = {
 
 export type WalletCard = {
   id: string;
+  public_token?: string | null;
   status: string;
   label: string | null;
   issued_at: string | null;
   last_seen_at: string | null;
+};
+
+export type WalletEligibleProduct = {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  wallet_eligible: boolean;
+  wallet_eligibility_status: 'unreviewed' | 'eligible' | 'restricted' | string;
+  wallet_eligibility_note: string | null;
+  wallet_eligibility_reviewed_at: string | null;
+  automatically_restricted: boolean;
 };
 
 export type WalletTransaction = {
@@ -233,6 +246,31 @@ export async function fetchWalletTransactions(
   return walletRequest<{ ok: true; transactions: WalletTransaction[] }>(
     `/transactions?${params.toString()}`,
     { token }
+  );
+}
+
+export async function fetchWalletEligibleProducts(token: string) {
+  return walletRequest<{ ok: true; products: WalletEligibleProduct[] }>(
+    '/products/wallet-eligibility',
+    { token }
+  );
+}
+
+export async function updateWalletProductEligibility(
+  token: string,
+  input: {
+    product_id: string;
+    eligible: boolean;
+    review_note: string;
+  }
+) {
+  return walletRequest<{ ok: true; product: WalletEligibleProduct }>(
+    '/products/wallet-eligibility',
+    {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify(input)
+    }
   );
 }
 

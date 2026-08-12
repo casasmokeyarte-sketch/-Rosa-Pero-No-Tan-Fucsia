@@ -9,6 +9,8 @@ import {
   LockKeyhole,
   LogOut,
   Nfc,
+  PackageCheck,
+  Printer,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -22,6 +24,7 @@ import {
   clearWalletOperatorSession,
   createOperatorWalletTopup,
   fetchWallet,
+  fetchWalletEligibleProducts,
   fetchWalletShiftSummary,
   fetchWalletTransactions,
   getWalletOperatorSession,
@@ -32,9 +35,11 @@ import {
   reverseOperatorWalletTransaction,
   saveWalletOperatorSession,
   WalletCard,
+  WalletEligibleProduct,
   WalletShiftSummary,
   WalletSummary,
-  WalletTransaction
+  WalletTransaction,
+  updateWalletProductEligibility
 } from '../lib/walletApi';
 
 type WalletOperadorAdminProps = {
@@ -64,6 +69,14 @@ const paymentLabels: Record<string, string> = {
   card: 'Tarjeta'
 };
 
+const escapeReportText = (value: unknown) =>
+  String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+
 export default function WalletOperadorAdmin({
   currentUser,
   clients,
@@ -79,6 +92,10 @@ export default function WalletOperadorAdmin({
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
   const [cards, setCards] = useState<WalletCard[]>([]);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [eligibleProducts, setEligibleProducts] = useState<WalletEligibleProduct[]>([]);
+  const [productSearch, setProductSearch] = useState('');
+  const [productReviewNotes, setProductReviewNotes] = useState<Record<string, string>>({});
+  const [eligibilityBusyId, setEligibilityBusyId] = useState('');
   const [shiftSummary, setShiftSummary] = useState<WalletShiftSummary | null>(null);
   const [amount, setAmount] = useState('1000');
   const [paymentMethod, setPaymentMethod] =
@@ -110,6 +127,16 @@ export default function WalletOperadorAdmin({
       .slice(0, 30);
   }, [clients, search]);
 
+  const filteredEligibilityProducts = useMemo(() => {
+    const query = productSearch.trim().toLowerCase();
+    if (!query) return eligibleProducts;
+    return eligibleProducts.filter((product) =>
+      [product.name, product.code, product.category]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [eligibleProducts, productSearch]);
+
   const expireSession = useCallback(() => {
     clearWalletOperatorSession(currentUser.id);
     setToken(null);
@@ -117,6 +144,7 @@ export default function WalletOperadorAdmin({
     setCards([]);
     setTransactions([]);
     setShiftSummary(null);
+    setEligibleProducts([]);
   }, [currentUser.id]);
 
   const handleApiError = useCallback(
@@ -146,6 +174,19 @@ export default function WalletOperadorAdmin({
     [expireSession]
   );
 
+  const loadEligibilityProducts = useCallback(
+    async (sessionToken: string) => {
+      if (!isAdmin) return;
+      try {
+        const response = await fetchWalletEligibleProducts(sessionToken);
+        setEligibleProducts(response.products);
+      } catch (requestError) {
+        handleApiError(requestError);
+      }
+    },
+    [handleApiError, isAdmin]
+  );
+
   const loadClientWallet = useCallback(
     async (sessionToken: string, clientId: string) => {
       setLoadingWallet(true);
@@ -173,6 +214,10 @@ export default function WalletOperadorAdmin({
   useEffect(() => {
     if (token) loadShiftSummary(token);
   }, [loadShiftSummary, token]);
+
+  useEffect(() => {
+    if (token && isAdmin) loadEligibilityProducts(token);
+  }, [isAdmin, loadEligibilityProducts, token]);
 
   useEffect(() => {
     if (token && selectedClientId) {
@@ -280,12 +325,20 @@ export default function WalletOperadorAdmin({
 
   const handleIssueCard = async () => {
     if (!token || !selectedClientId || !isAdmin) return;
+    if (nfcMode !== 'uid' || !nfcValue.trim()) {
+      setError('Primero selecciona UID del lector e ingresa el código leído de la tarjeta física.');
+      return;
+    }
+    if (cards.some((card) => card.status === 'active')) {
+      setError('Este cliente ya tiene una tarjeta activa. Bloquéala antes de vincular una tarjeta de reemplazo.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const response = await issueWalletNfc(token, {
         client_id: selectedClientId,
-        uid: nfcMode === 'uid' && nfcValue.trim() ? nfcValue.trim() : undefined,
+        uid: nfcValue.trim(),
         label: newCardLabel.trim() || undefined
       });
       showToast(
@@ -299,6 +352,100 @@ export default function WalletOperadorAdmin({
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleEligibilityChange = async (
+    product: WalletEligibleProduct,
+    eligible: boolean
+  ) => {
+    if (!token || !isAdmin) return;
+    const reviewNote = (productReviewNotes[product.id] || '').trim();
+    if (reviewNote.length < 10) {
+      setError('Escribe una observación de revisión de al menos 10 caracteres para ese producto.');
+      return;
+    }
+    if (
+      eligible &&
+      !window.confirm(
+        'Confirma que una persona adulta autorizada revisó este producto y que NO es restringido ni está sujeto a controles de edad.'
+      )
+    ) {
+      return;
+    }
+
+    setEligibilityBusyId(product.id);
+    setError('');
+    try {
+      const response = await updateWalletProductEligibility(token, {
+        product_id: product.id,
+        eligible,
+        review_note: reviewNote
+      });
+      setEligibleProducts((current) =>
+        current.map((item) =>
+          item.id === response.product.id ? response.product : item
+        )
+      );
+      showToast(
+        eligible
+          ? 'Producto habilitado para pagos con Bolsillo.'
+          : 'Producto bloqueado para pagos con Bolsillo.',
+        eligible ? 'success' : 'warning'
+      );
+    } catch (requestError) {
+      handleApiError(requestError);
+    } finally {
+      setEligibilityBusyId('');
+    }
+  };
+
+  const handlePrintStatement = () => {
+    if (!selectedClient || !wallet) {
+      setError('Selecciona un cliente y consulta su Bolsillo antes de imprimir.');
+      return;
+    }
+    const reportWindow = window.open('', '_blank', 'width=980,height=760');
+    if (!reportWindow) {
+      setError('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes e inténtalo otra vez.');
+      return;
+    }
+    reportWindow.opener = null;
+    const rows = transactions
+      .map(
+        (transaction) => `
+          <tr>
+            <td>${escapeReportText(new Date(transaction.created_at).toLocaleString('es-CO'))}</td>
+            <td>${escapeReportText(transaction.notes || transaction.kind)}</td>
+            <td>${escapeReportText(transaction.operator_name || 'Sistema')}</td>
+            <td class="amount">${transaction.direction === 'credit' ? '+' : '-'}${escapeReportText(money(transaction.amount))}</td>
+            <td class="amount">${escapeReportText(money(transaction.balance_after))}</td>
+          </tr>`
+      )
+      .join('');
+    reportWindow.document.write(`<!doctype html>
+      <html lang="es"><head><meta charset="utf-8"><title>Estado de cuenta</title>
+      <style>
+        body{font-family:Arial,sans-serif;color:#111;margin:32px}h1{font-size:22px;margin:0 0 6px}
+        .meta{color:#444;font-size:12px;margin-bottom:22px}.summary{display:flex;gap:24px;padding:14px;border:1px solid #bbb;margin-bottom:18px}
+        table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #bbb;padding:8px;text-align:left}
+        th{background:#eee}.amount{text-align:right;white-space:nowrap}.footer{margin-top:20px;font-size:10px;color:#555}
+        @media print{body{margin:12mm}}
+      </style></head><body>
+      <h1>Estado de cuenta del Bolsillo</h1>
+      <div class="meta">Generado: ${escapeReportText(new Date().toLocaleString('es-CO'))}</div>
+      <div class="summary">
+        <div><strong>Cliente:</strong><br>${escapeReportText(selectedClient.name)}</div>
+        <div><strong>Documento:</strong><br>${escapeReportText(selectedClient.rut)}</div>
+        <div><strong>Saldo:</strong><br>${escapeReportText(money(wallet.balance))}</div>
+        <div><strong>Estado:</strong><br>${escapeReportText(wallet.status)}</div>
+      </div>
+      <table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Operador</th><th>Valor</th><th>Saldo</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5">No hay movimientos confirmados.</td></tr>'}</tbody></table>
+      <div class="footer">Este reporte es informativo. Los movimientos confirmados permanecen en el libro contable del sistema.</div>
+      </body></html>`);
+    reportWindow.document.close();
+    reportWindow.focus();
+    window.setTimeout(() => reportWindow.print(), 250);
   };
 
   const handleBlockCard = async (cardId: string) => {
@@ -427,6 +574,100 @@ export default function WalletOperadorAdmin({
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs">
           {error}
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="bg-cyber-card border border-cyber-border rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex items-center gap-2">
+              <PackageCheck size={17} className="text-emerald-300" />
+              <div>
+                <h3 className="text-white text-xs font-black font-mono uppercase">
+                  Productos habilitados para Bolsillo
+                </h3>
+                <p className="text-[9px] text-gray-500">
+                  Solo una persona adulta autorizada puede habilitar productos no restringidos.
+                </p>
+              </div>
+            </div>
+            <input
+              value={productSearch}
+              onChange={(event) => setProductSearch(event.target.value)}
+              placeholder="Buscar por nombre, código o categoría…"
+              className="sm:ml-auto w-full sm:max-w-sm rounded-xl bg-slate-950 border border-slate-800 p-3 text-white text-xs"
+            />
+          </div>
+          <div className="max-h-96 overflow-y-auto space-y-2">
+            {filteredEligibilityProducts.slice(0, 50).map((product) => (
+              <div
+                key={product.id}
+                className="rounded-xl bg-slate-950 border border-slate-800 p-3 grid grid-cols-1 lg:grid-cols-[1fr_1.2fr_auto] gap-3 lg:items-center"
+              >
+                <div>
+                  <p className="text-white text-xs font-bold">{product.name}</p>
+                  <p className="text-[9px] text-gray-500">
+                    {product.code} · {product.category || 'Sin categoría'}
+                  </p>
+                  <span
+                    className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[8px] font-bold ${
+                      product.wallet_eligible
+                        ? 'bg-emerald-500/15 text-emerald-200'
+                        : product.automatically_restricted
+                          ? 'bg-red-500/15 text-red-200'
+                          : 'bg-amber-500/15 text-amber-200'
+                    }`}
+                  >
+                    {product.wallet_eligible
+                      ? 'APTO PARA BOLSILLO'
+                      : product.automatically_restricted
+                        ? 'RESTRINGIDO AUTOMÁTICAMENTE'
+                        : 'NO CLASIFICADO'}
+                  </span>
+                </div>
+                <input
+                  value={productReviewNotes[product.id] || ''}
+                  onChange={(event) =>
+                    setProductReviewNotes((current) => ({
+                      ...current,
+                      [product.id]: event.target.value
+                    }))
+                  }
+                  placeholder="Motivo de la revisión (mínimo 10 caracteres)…"
+                  className="rounded-xl bg-black/30 border border-slate-800 p-2.5 text-white text-[10px]"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEligibilityChange(product, false)}
+                    disabled={eligibilityBusyId === product.id}
+                    className="px-3 py-2 rounded-lg border border-red-500/30 text-red-200 text-[9px] font-bold disabled:opacity-40"
+                  >
+                    BLOQUEAR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEligibilityChange(product, true)}
+                    disabled={
+                      eligibilityBusyId === product.id ||
+                      product.automatically_restricted
+                    }
+                    className="px-3 py-2 rounded-lg bg-emerald-500 text-black text-[9px] font-black disabled:opacity-30"
+                  >
+                    HABILITAR
+                  </button>
+                </div>
+              </div>
+            ))}
+            {filteredEligibilityProducts.length === 0 && (
+              <p className="text-xs text-gray-500 text-center py-6">
+                No se encontraron productos.
+              </p>
+            )}
+          </div>
+          <p className="text-[9px] text-amber-200/80">
+            Los controles automáticos son una barrera adicional; no reemplazan la revisión legal, de identidad o de edad.
+          </p>
         </div>
       )}
 
@@ -582,7 +823,7 @@ export default function WalletOperadorAdmin({
                     disabled={busy || wallet?.status !== 'active'}
                     className="w-full py-3 rounded-xl bg-emerald-500 text-black font-black text-xs disabled:opacity-40"
                   >
-                    REGISTRAR EN MI TURNO
+                    DEPOSITAR
                   </button>
                   <p className="text-[9px] text-amber-200/80">
                     Requiere un único turno abierto del operador y se reflejará en su cierre.
@@ -614,6 +855,9 @@ export default function WalletOperadorAdmin({
                             <p className="text-[9px] text-gray-500">
                               Estado: {card.status}
                             </p>
+                            <p className="text-[9px] text-cyan-200 font-mono break-all">
+                              Código: {card.public_token || card.id}
+                            </p>
                           </div>
                           {isAdmin && card.status === 'active' && (
                             <button
@@ -641,13 +885,18 @@ export default function WalletOperadorAdmin({
                       <button
                         type="button"
                         onClick={handleIssueCard}
-                        disabled={busy}
+                        disabled={
+                          busy ||
+                          nfcMode !== 'uid' ||
+                          !nfcValue.trim() ||
+                          cards.some((card) => card.status === 'active')
+                        }
                         className="w-full py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 text-xs font-bold disabled:opacity-40"
                       >
                         VINCULAR NUEVA TARJETA
                       </button>
                       <p className="text-[9px] text-gray-500">
-                        Si ingresaste un UID del lector, se asociará de forma cifrada. El UID original no se almacena.
+                        Selecciona «UID del lector», lee la tarjeta y confirma que el código aparezca arriba. El UID se guarda únicamente como hash; el código interno permite identificar la vinculación.
                       </p>
                     </div>
                   )}
@@ -660,6 +909,14 @@ export default function WalletOperadorAdmin({
                   <h3 className="text-white text-xs font-black font-mono uppercase">
                     Movimientos del cliente
                   </h3>
+                  <button
+                    type="button"
+                    onClick={handlePrintStatement}
+                    className="ml-auto px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-gray-200 text-[10px] font-bold flex items-center gap-2"
+                  >
+                    <Printer size={14} />
+                    IMPRIMIR ESTADO DE CUENTA
+                  </button>
                 </div>
                 {transactions.length === 0 ? (
                   <div className="p-8 text-center text-gray-500 text-xs">
