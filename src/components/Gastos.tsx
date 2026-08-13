@@ -16,7 +16,7 @@ interface GastosProps {
   shifts: Shift[];
   currentUser: any;
   config?: BusinessConfig;
-  onAddExpense: (expense: Expense) => void;
+  onAddExpense: (expense: Expense) => Promise<void> | void;
 }
 
 export default function Gastos({ 
@@ -38,10 +38,12 @@ export default function Gastos({
   const [paymentMethod, setPaymentMethod] = useState(() => config?.paymentMethods?.[0] || 'Efectivo');
   
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSavingExpense, setIsSavingExpense] = useState(false);
 
   // Submit expense
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingExpense) return;
 
     if (!activeShift) {
       setErrorMsg("⚠️ CAJA BLOQUEADA: No se pueden asentar gastos sin antes APERURAR LA JORNADA de caja.");
@@ -58,8 +60,11 @@ export default function Gastos({
       return;
     }
 
+    const timestamp = Date.now();
+    const randomToken = globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 8)
+      ?? Math.random().toString(36).slice(2, 10);
     const newExpense: Expense = {
-      id: `exp-${Date.now()}`,
+      id: `exp-${timestamp}-${randomToken}`,
       category,
       amount: parseFloat(amount.toString()) || 0,
       description,
@@ -68,15 +73,23 @@ export default function Gastos({
       cashierName: currentUser.fullName
     };
 
-    onAddExpense(newExpense);
+    setIsSavingExpense(true);
+    try {
+      await onAddExpense(newExpense);
 
-    // Reset and close
-    setCategory('Suministros');
-    setAmount(10);
-    setDescription('');
-    setPaymentMethod('Efectivo');
-    setErrorMsg(null);
-    setShowAddModal(false);
+      // Reset and close only after Supabase confirms the expense.
+      setCategory('Suministros');
+      setAmount(10);
+      setDescription('');
+      setPaymentMethod('Efectivo');
+      setErrorMsg(null);
+      setShowAddModal(false);
+    } catch (error) {
+      console.error('Expense save failed:', error);
+      setErrorMsg('❌ NO CONFIRMADO: Supabase no confirmó el gasto. El formulario sigue abierto para reintentar.');
+    } finally {
+      setIsSavingExpense(false);
+    }
   };
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
