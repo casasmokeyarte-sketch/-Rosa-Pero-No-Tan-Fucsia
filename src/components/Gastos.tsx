@@ -42,8 +42,8 @@ export default function Gastos({
 
   // Submit expense
   const handleSubmit = async (e: React.FormEvent) => {
-    if (isSavingExpense) return;
     e.preventDefault();
+    if (isSavingExpense) return;
 
     if (!activeShift) {
       setErrorMsg("⚠️ CAJA BLOQUEADA: No se pueden asentar gastos sin antes APERURAR LA JORNADA de caja.");
