@@ -27,7 +27,7 @@ interface FacturacionProps {
   shifts: Shift[];
   config: BusinessConfig;
   currentUser: any;
-  onAddInvoice: (invoice: Invoice) => void;
+  onAddInvoice: (invoice: Invoice) => Promise<void> | void;
   onAddClient: (client: Client) => void;
   discounts: Discount[];
   users: User[];
@@ -81,6 +81,7 @@ export default function Facturacion({
 
   // Form errors
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSavingInvoice, setIsSavingInvoice] = useState(false);
 
   // Delivery / Domicilios states
   const [isDelivery, setIsDelivery] = useState(false);
@@ -505,7 +506,8 @@ export default function Facturacion({
   const isCreditExceeded = selectedClient && paymentMethod.toLowerCase().includes('cred') && total > creditAvailable;
 
   // Process checkout & save invoice
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
+    if (isSavingInvoice) return;
     // Check permission
     const hasPermission = currentUser?.permissions ? !!currentUser.permissions.crear_factura : true;
     if (!hasPermission) {
@@ -562,17 +564,16 @@ export default function Facturacion({
       return;
     }
 
-    // Generate Invoice Number
-    const lastInvoiceNum = invoices.length > 0 
-      ? parseInt(invoices[invoices.length - 1].invoiceNumber.split('-')[1]) 
-      : 0;
-    const nextNum = String(lastInvoiceNum + 1).padStart(4, '0');
-    const invoiceNumber = `${config.invoicePrefix}-${nextNum}`;
+    // Generate a collision-resistant ID and reference across operators/devices.
+    const timestamp = Date.now();
+    const randomToken = globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 8)
+      ?? Math.random().toString(36).slice(2, 10);
+    const invoiceNumber = `${config.invoicePrefix}-${timestamp.toString(36).toUpperCase()}-${randomToken.slice(0, 4).toUpperCase()}`;
 
     const isCredit = paymentMethod.toLowerCase().includes('cred');
 
     const newInvoice: Invoice = {
-      id: `inv-${Date.now()}`,
+      id: `inv-${timestamp}-${randomToken}`,
       invoiceNumber,
       clientId: clientToUse.id,
       clientName: clientToUse.name,
@@ -602,21 +603,29 @@ export default function Facturacion({
       guideNotes: isDelivery ? guideNotes.trim() : undefined
     };
 
-    onAddInvoice(newInvoice);
-    setGeneratedInvoice(newInvoice);
-    
-    // Clear invoice states
-    setCartItems([]);
-    setSelectedClient(null);
-    setClientSearch('');
-    setDiscount(0);
-    setDiscountAuthorizedBy(null);
-    setErrorMsg(null);
-    setIsDelivery(false);
-    setDeliveryFee(0);
-    setDeliveryRider('');
-    setDeliveryTransport('Motocicleta');
-    setSignatureDataUrl('');
+    setIsSavingInvoice(true);
+    try {
+      await onAddInvoice(newInvoice);
+      setGeneratedInvoice(newInvoice);
+
+      // Clear invoice states only after Supabase confirms the transaction.
+      setCartItems([]);
+      setSelectedClient(null);
+      setClientSearch('');
+      setDiscount(0);
+      setDiscountAuthorizedBy(null);
+      setErrorMsg(null);
+      setIsDelivery(false);
+      setDeliveryFee(0);
+      setDeliveryRider('');
+      setDeliveryTransport('Motocicleta');
+      setSignatureDataUrl('');
+    } catch (error) {
+      console.error('Invoice checkout failed:', error);
+      setErrorMsg('❌ NO CONFIRMADA: Supabase no confirmó la factura. El formulario sigue intacto para reintentar.');
+    } finally {
+      setIsSavingInvoice(false);
+    }
   };
 
   // Trigger browser print
@@ -1425,9 +1434,9 @@ export default function Facturacion({
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={isCreditExceeded}
+          disabled={isCreditExceeded || isSavingInvoice}
           className={`w-full py-4 rounded-xl font-bold tracking-wider font-mono text-xs transition-all flex items-center justify-center gap-2 ${
-            isCreditExceeded 
+            isCreditExceeded || isSavingInvoice
               ? 'bg-slate-800 border border-slate-700 text-gray-600 cursor-not-allowed'
               : 'bg-cyber-pink text-black hover:bg-cyber-accent hover:scale-[1.02] active:scale-[0.98] cursor-pointer neon-shadow-pink font-extrabold'
           }`}

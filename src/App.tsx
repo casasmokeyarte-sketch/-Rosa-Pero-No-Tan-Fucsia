@@ -927,7 +927,7 @@ export default function App() {
         setInvoices(prev => {
           const merged = [...prev];
           dbInvoices.forEach(dbInv => {
-            const exists = merged.some(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+            const exists = merged.some(i => i.id === dbInv.id);
             if (!exists) merged.push(dbInv);
           });
           return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1080,7 +1080,7 @@ export default function App() {
               setInvoices(prev => {
                 const merged = [...prev];
                 dbInvoices.forEach(dbInv => {
-                  const exists = merged.some(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+                  const exists = merged.some(i => i.id === dbInv.id);
                   if (!exists) {
                     merged.push(dbInv);
                   }
@@ -1310,7 +1310,7 @@ export default function App() {
         setInvoices(prev => {
           if (eventType === 'INSERT') {
             const mapped = toCamel(newRow);
-            const exists = prev.some(i => i.id === mapped.id || i.invoiceNumber === mapped.invoiceNumber);
+            const exists = prev.some(i => i.id === mapped.id);
             if (exists) return prev;
             knownInvoiceIdsRef.current.add(mapped.id);
             return [...prev, mapped].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1686,7 +1686,7 @@ export default function App() {
           setInvoices(prev => {
             const merged = [...prev];
             dbInvoices.forEach(dbInv => {
-              const idx = merged.findIndex(i => i.id === dbInv.id || i.invoiceNumber === dbInv.invoiceNumber);
+              const idx = merged.findIndex(i => i.id === dbInv.id);
               if (idx >= 0) {
                 merged[idx] = dbInv;
               } else {
@@ -1893,17 +1893,25 @@ export default function App() {
   // Business operations
   
   // 1. New Invoice logic (reduces inventory, updates cashier shifts, increases credit balances if necessary)
-  const handleAddInvoice = (newInvoice: Invoice) => {
-    // A. Add Invoice to ledger
-    setInvoices(prev => [...prev, newInvoice]);
+  const handleAddInvoice = async (newInvoice: Invoice) => {
+    // Confirm the primary accounting record before changing local history.
+    if (isSupabaseEnabled) {
+      try {
+        await syncUpsert('invoices', newInvoice);
+      } catch (error) {
+        console.error('Invoice persistence failed:', error);
+        showToast('No se pudo confirmar la factura en Supabase. El formulario quedó intacto para reintentar.', 'error');
+        throw error;
+      }
+    }
+
+    // A. Add Invoice to ledger, deduplicating only by immutable ID.
+    setInvoices(prev => prev.some(invoice => invoice.id === newInvoice.id) ? prev : [...prev, newInvoice]);
 
     const isPurchaseOrder = newInvoice.paymentStatus === 'Orden de Compra';
 
     if (isPurchaseOrder) {
       showToast(`Nueva orden de compra #${newInvoice.invoiceNumber} recibida en espera de aprobación`, "info");
-      if (isSupabaseEnabled) {
-        syncUpsert('invoices', newInvoice);
-      }
       return;
     }
 
@@ -1987,7 +1995,6 @@ export default function App() {
 
     // Supabase sync
     if (isSupabaseEnabled) {
-      syncUpsert('invoices', newInvoice);
       for (const log of newStockLogs) {
         syncUpsert('stock_adjustments', log);
       }
@@ -2586,9 +2593,19 @@ export default function App() {
   };
 
   // 6. Expense additions
-  const handleAddExpense = (expense: Expense) => {
-    setExpenses(prev => [...prev, expense]);
-    if (isSupabaseEnabled) syncUpsert('expenses', expense);
+  const handleAddExpense = async (expense: Expense) => {
+    // Confirm the expense before changing the local register balance.
+    if (isSupabaseEnabled) {
+      try {
+        await syncUpsert('expenses', expense);
+      } catch (error) {
+        console.error('Expense persistence failed:', error);
+        showToast('No se pudo confirmar el gasto en Supabase. El formulario quedó intacto para reintentar.', 'error');
+        throw error;
+      }
+    }
+
+    setExpenses(prev => prev.some(item => item.id === expense.id) ? prev : [...prev, expense]);
     
     // deduct from active shiftexpected cash immediately if paid in cash
     if (expense.paymentMethod === 'Efectivo') {

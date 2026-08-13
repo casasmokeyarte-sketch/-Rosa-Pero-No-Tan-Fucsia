@@ -66,11 +66,24 @@ export async function syncUpsert(table: string, data: any) {
   }
   if (!supabase) return null;
   const mapped = mapKeys(data, toSnakeCase);
-  const { error } = await supabase.from(table).upsert(mapped);
-  if (error) {
-    console.error(`Error upserting into table ${table}:`, error);
-    throw error;
+  let lastError: unknown = null;
+
+  // Reuse the same immutable ID on every attempt, making transient retries idempotent.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const { error } = await supabase.from(table).upsert(mapped);
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      lastError = error;
+      console.error(`Error upserting into table ${table} (attempt ${attempt}/3):`, error);
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, attempt * 400));
+      }
+    }
   }
+
+  throw lastError;
 }
 
 export async function syncDelete(table: string, id: string) {
@@ -100,11 +113,11 @@ export async function fetchTable(table: string): Promise<any[]> {
   if (table === 'chat_messages') {
     query = query.order('timestamp', { ascending: false }).limit(50);
   } else if (table === 'invoices') {
-    query = query.order('created_at', { ascending: false }).limit(100);
+    query = query.order('created_at', { ascending: false }).limit(1000);
   } else if (table === 'stock_adjustments') {
     query = query.order('created_at', { ascending: false }).limit(50);
   } else if (table === 'expenses') {
-    query = query.order('created_at', { ascending: false }).limit(50);
+    query = query.order('created_at', { ascending: false }).limit(500);
   } else if (table === 'shifts') {
     query = query.order('start_time', { ascending: false }).limit(30);
   } else if (table === 'payroll_entries') {
