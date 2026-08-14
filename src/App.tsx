@@ -1177,10 +1177,6 @@ export default function App() {
             const dbFlashMessages = await fetchTable('flash_messages');
             if (dbFlashMessages && dbFlashMessages.length > 0) {
               setFlashMessages(dbFlashMessages);
-            } else if (flashMessages.length > 0) {
-              for (const fm of flashMessages) {
-                await syncUpsert('flash_messages', fm);
-              }
             }
           } catch (e) {
             console.error("Error cargando flash_messages en segundo plano:", e);
