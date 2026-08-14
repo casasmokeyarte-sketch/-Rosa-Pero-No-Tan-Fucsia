@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User, getClientBillingBlockReason } from '../types';
 import CyberEmpty from './CyberEmpty';
 import VerifiedAddressInput, { VerifiedAddressSelection } from './VerifiedAddressInput';
@@ -83,6 +83,7 @@ export default function Facturacion({
   // Form errors
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
+  const isSavingInvoiceRef = useRef(false);
 
   // Delivery / Domicilios states
   const [isDelivery, setIsDelivery] = useState(false);
@@ -622,6 +623,10 @@ export default function Facturacion({
       guideNotes: isDelivery ? guideNotes.trim() : undefined
     };
 
+    // React state does not update synchronously. The ref closes the small window
+    // where a rapid second click could create another invoice with a new ID.
+    if (isSavingInvoiceRef.current) return;
+    isSavingInvoiceRef.current = true;
     setIsSavingInvoice(true);
     try {
       await onAddInvoice(newInvoice);
@@ -644,6 +649,7 @@ export default function Facturacion({
       console.error('Invoice checkout failed:', error);
       setErrorMsg('❌ NO CONFIRMADA: Supabase no confirmó la factura. El formulario sigue intacto para reintentar.');
     } finally {
+      isSavingInvoiceRef.current = false;
       setIsSavingInvoice(false);
     }
   };

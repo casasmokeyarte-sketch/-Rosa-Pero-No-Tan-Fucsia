@@ -29,7 +29,7 @@ import {
   INITIAL_ADJUSTMENTS 
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
-import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys, mergeRecordsById, syncMissingRecords } from './lib/sync';
+import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -922,28 +922,18 @@ export default function App() {
 
       const dbInvoices = await fetchTable('invoices');
       if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
         dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
-        setInvoices(prev => {
-          const merged = [...prev];
-          dbInvoices.forEach(dbInv => {
-            const exists = merged.some(i => i.id === dbInv.id);
-            if (!exists) merged.push(dbInv);
-          });
-          return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        });
+        setInvoices([...dbInvoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       }
 
       const dbExpenses = await fetchTable('expenses');
       if (dbExpenses && dbExpenses.length > 0) {
-        await syncMissingRecords('expenses', expenses, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
-        setExpenses(prev => mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id)));
+        setExpenses(dbExpenses);
       }
 
       const dbShifts = await fetchTable('shifts');
       if (dbShifts && dbShifts.length > 0) {
-        await syncMissingRecords('shifts', shifts, dbShifts, INITIAL_SHIFTS.map(item => item.id));
-        setShifts(prev => mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id)));
+        setShifts(dbShifts);
       }
 
       const dbAdjustments = await fetchTable('stock_adjustments');
@@ -1075,20 +1065,8 @@ export default function App() {
           try {
             const dbInvoices = await fetchTable('invoices');
             if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
               dbInvoices.forEach(inv => knownInvoiceIdsRef.current.add(inv.id));
-              setInvoices(prev => {
-                const merged = [...prev];
-                dbInvoices.forEach(dbInv => {
-                  const exists = merged.some(i => i.id === dbInv.id);
-                  if (!exists) {
-                    merged.push(dbInv);
-                  }
-                });
-                return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-              });
-            } else if (invoices.length > 0) {
-              await syncMissingRecords('invoices', invoices, [], INITIAL_INVOICES.map(item => item.id));
+              setInvoices([...dbInvoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
             }
           } catch (e) {
             console.error("Error cargando invoices en segundo plano:", e);
@@ -1098,10 +1076,7 @@ export default function App() {
           try {
             const dbExpenses = await fetchTable('expenses');
             if (dbExpenses && dbExpenses.length > 0) {
-              await syncMissingRecords('expenses', expenses, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
-              setExpenses(prev => mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id)));
-            } else if (expenses.length > 0) {
-              await syncMissingRecords('expenses', expenses, [], INITIAL_EXPENSES.map(item => item.id));
+              setExpenses(dbExpenses);
             }
           } catch (e) {
             console.error("Error cargando expenses en segundo plano:", e);
@@ -1109,12 +1084,9 @@ export default function App() {
 
           // Shifts
           try {
-        const dbShifts = await fetchTable('shifts');
+            const dbShifts = await fetchTable('shifts');
             if (dbShifts && dbShifts.length > 0) {
-              await syncMissingRecords('shifts', shifts, dbShifts, INITIAL_SHIFTS.map(item => item.id));
-              setShifts(prev => mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id)));
-            } else if (shifts.length > 0) {
-              await syncMissingRecords('shifts', shifts, [], INITIAL_SHIFTS.map(item => item.id));
+              setShifts(dbShifts);
             }
           } catch (e) {
             console.error("Error cargando shifts en segundo plano:", e);
@@ -1682,26 +1654,7 @@ export default function App() {
       try {
         const dbInvoices = await fetchTable('invoices');
         if (dbInvoices && dbInvoices.length > 0) {
-        await syncMissingRecords('invoices', invoices, dbInvoices, INITIAL_INVOICES.map(item => item.id));
-          setInvoices(prev => {
-            const merged = [...prev];
-            dbInvoices.forEach(dbInv => {
-              const idx = merged.findIndex(i => i.id === dbInv.id);
-              if (idx >= 0) {
-                merged[idx] = dbInv;
-              } else {
-                merged.push(dbInv);
-              }
-            });
-            const sortedMerged = merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            
-            const idsPrev = prev.map(i => i.id).join(',');
-            const idsMerged = sortedMerged.map(i => i.id).join(',');
-            if (idsPrev !== idsMerged || prev.length !== sortedMerged.length) {
-              return sortedMerged;
-            }
-            return prev;
-          });
+          setInvoices([...dbInvoices].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
         }
 
         const dbProducts = await fetchTable('products');
@@ -1738,28 +1691,11 @@ export default function App() {
 
         const dbExpenses = await fetchTable('expenses');
         if (dbExpenses && dbExpenses.length > 0) {
-          setExpenses(prev => {
-            const merged = mergeRecordsById(prev, dbExpenses, INITIAL_EXPENSES.map(item => item.id));
-            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
-            const sortedMerged = [...merged].sort((a, b) => a.id.localeCompare(b.id));
-
-            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedMerged)) {
-              return merged;
-            }
-
-            return prev;
-          });
+          setExpenses(dbExpenses);
         }
         const dbShifts = await fetchTable('shifts');
         if (dbShifts && dbShifts.length > 0) {
-          const sortedNew = [...dbShifts].sort((a, b) => a.id.localeCompare(b.id));
-          setShifts(prev => {
-            const sortedPrev = [...prev].sort((a, b) => a.id.localeCompare(b.id));
-            if (JSON.stringify(sortedPrev) !== JSON.stringify(sortedNew)) {
-              return mergeRecordsById(prev, dbShifts, INITIAL_SHIFTS.map(item => item.id));
-            }
-            return prev;
-          });
+          setShifts(dbShifts);
         }
       } catch (err) {
         console.error("Error polling slow data:", err);
@@ -1867,7 +1803,7 @@ export default function App() {
   useEffect(() => {
     // Limit local invoices storage to prevent exceeding browser quota
     try {
-      const slicedInvoices = invoices.slice(-150);
+      const slicedInvoices = invoices.slice(0, 150);
       safeSetItem('extreme_invoices', JSON.stringify(slicedInvoices));
     } catch (e) {
       console.warn("Failed to slice and save invoices:", e);
