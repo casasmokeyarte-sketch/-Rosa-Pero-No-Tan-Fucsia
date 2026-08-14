@@ -82,6 +82,8 @@ export interface Invoice {
   guideRut?: string;
   guidePhone?: string;
   guideAddress?: string;
+  deliveryAddressPlaceId?: string;
+  deliveryAddressVerified?: boolean;
   guideNotes?: string;
   cardFee?: number;
   walletPaidAmount?: number;
@@ -142,7 +144,7 @@ export interface Discount {
   startTime?: string;
   endTime?: string;
   activeDays: number[];
-  appliesTo: 'todos' | 'facturacion' | 'domicilios';
+  appliesTo: 'todos' | 'facturacion' | 'domicilios' | 'web' | 'primera_compra_web';
   createdAt: string;
 }
 

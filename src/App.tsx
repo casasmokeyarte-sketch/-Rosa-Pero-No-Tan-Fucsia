@@ -1532,7 +1532,7 @@ export default function App() {
             
             const subtotal = pending.cart.reduce((sum: number, item: any) => sum + (item.product.price * item.quantity), 0);
             const tax = 0;
-            const cost = pending.deliveryMethod === 'oficina' ? 15000.00 : 0.00;
+            const cost = 0;
             const fee = config.cardFeeEnabled ? parseFloat(((subtotal + cost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2)) : 0;
             const total = subtotal + tax + cost + fee;
 
@@ -2874,6 +2874,7 @@ export default function App() {
         products={products}
         invoices={invoices}
         config={config}
+        discounts={discounts}
         onAddInvoice={handleAddInvoice}
         onLogout={() => setCurrentClient(null)}
         chatMessages={chatMessages}

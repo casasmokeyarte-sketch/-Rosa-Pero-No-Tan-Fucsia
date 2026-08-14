@@ -170,8 +170,13 @@ export default function ComprasWeb({ invoices, config, onUpdateInvoice, products
       return;
     }
 
+    if (reviewInvoice.deliveryMethod === 'oficina' && (editedDeliveryFee < 10000 || editedDeliveryFee > 30000)) {
+      alert("Para domicilio de la oficina, ingresa una tarifa entre $10.000 y $30.000 COP según dirección y horario.");
+      return;
+    }
+
     const calculatedSubtotal = editedItems.reduce((sum, item) => sum + item.total, 0);
-    const calculatedTotal = calculatedSubtotal + editedDeliveryFee;
+    const calculatedTotal = Math.max(0, calculatedSubtotal - (reviewInvoice.discount || 0)) + editedDeliveryFee;
 
     const approvedInvoice: Invoice = {
       ...reviewInvoice,
@@ -600,10 +605,16 @@ export default function ComprasWeb({ invoices, config, onUpdateInvoice, products
                   <label className="block text-gray-400 font-bold mb-1 uppercase text-[10px]">Costo de Domicilio / Envío ($):</label>
                   <input
                     type="number"
+                    min={reviewInvoice.deliveryMethod === 'oficina' ? 10000 : 0}
+                    max={reviewInvoice.deliveryMethod === 'oficina' ? 30000 : undefined}
+                    step="1000"
                     value={editedDeliveryFee}
                     onChange={e => setEditedDeliveryFee(Math.max(0, parseFloat(e.target.value) || 0))}
                     className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none"
                   />
+                  {reviewInvoice.deliveryMethod === 'oficina' && (
+                    <p className="mt-1 text-[9px] text-amber-300">Rango informado al cliente: $10.000–$30.000 COP.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-gray-400 font-bold mb-1 uppercase text-[10px]">Dirección de Entrega:</label>
@@ -634,7 +645,9 @@ export default function ComprasWeb({ invoices, config, onUpdateInvoice, products
                 <div>Subtotal Productos: <span className="font-bold text-white">${editedItems.reduce((sum, item) => sum + item.total, 0).toLocaleString('es-CO')} COP</span></div>
                 <div>Costo Domicilio: <span className="font-bold text-white">${editedDeliveryFee.toLocaleString('es-CO')} COP</span></div>
                 <div className="text-xs pt-1 border-t border-slate-900 text-cyber-pink font-bold">
-                  TOTAL A PAGAR: ${(editedItems.reduce((sum, item) => sum + item.total, 0) + editedDeliveryFee).toLocaleString('es-CO')} COP
+                  TOTAL A PAGAR: ${(
+                    Math.max(0, editedItems.reduce((sum, item) => sum + item.total, 0) - (reviewInvoice.discount || 0)) + editedDeliveryFee
+                  ).toLocaleString('es-CO')} COP
                 </div>
               </div>
 
