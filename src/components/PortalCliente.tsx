@@ -335,7 +335,6 @@ export default function PortalCliente({
     const currentTime = now.toTimeString().slice(0, 5);
     const day = now.getDay();
     const eligibleBase = cart
-      .filter(item => item.product.walletEligible === true)
       .reduce((sum, item) => sum + item.product.price * item.quantity, 0);
 
     if (eligibleBase <= 0) return null;
