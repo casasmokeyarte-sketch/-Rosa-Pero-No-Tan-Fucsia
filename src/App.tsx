@@ -3582,7 +3582,6 @@ export default function App() {
               config={config}
               currentUser={currentUser}
               onAddInvoice={handleAddInvoice}
-              onAddClient={handleAddClient}
               discounts={discounts}
               users={users}
             />

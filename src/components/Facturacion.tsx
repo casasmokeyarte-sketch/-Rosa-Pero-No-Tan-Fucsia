@@ -28,7 +28,6 @@ interface FacturacionProps {
   config: BusinessConfig;
   currentUser: any;
   onAddInvoice: (invoice: Invoice) => Promise<void> | void;
-  onAddClient: (client: Client) => void;
   discounts: Discount[];
   users: User[];
 }
@@ -41,7 +40,6 @@ export default function Facturacion({
   config,
   currentUser,
   onAddInvoice,
-  onAddClient,
   discounts = [],
   users = []
 }: FacturacionProps) {
@@ -68,12 +66,6 @@ export default function Facturacion({
   });
 
   // Modals / Flow states
-  const [showQuickClient, setShowQuickClient] = useState(false);
-  const [quickClientName, setQuickClientName] = useState('');
-  const [quickClientRut, setQuickClientRut] = useState('');
-  const [quickClientEmail, setQuickClientEmail] = useState('');
-  const [quickClientPhone, setQuickClientPhone] = useState('');
-  const [quickClientCredit, setQuickClientCredit] = useState(0);
 
   // Generated Invoice state (for receipt modal)
   const [generatedInvoice, setGeneratedInvoice] = useState<Invoice | null>(null);
@@ -438,40 +430,6 @@ export default function Facturacion({
       }
       return item;
     }));
-  };
-
-  // Quick Client Creation
-  const handleCreateQuickClient = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickClientName || !quickClientRut) {
-      setErrorMsg("Nombre y RUT/NIT son requeridos para la afiliación de clientes.");
-      return;
-    }
-
-    const newClient: Client = {
-      id: `c-${Date.now()}`,
-      name: quickClientName,
-      rut: quickClientRut,
-      email: quickClientEmail || "operaciones@anonimo.net",
-      phone: quickClientPhone || "+57 (300) 000-0000",
-      address: "Zona Franca de Tránsito",
-      creditLimit: 0,
-      outstandingBalance: 0,
-      createdAt: new Date().toISOString()
-    };
-
-    onAddClient(newClient);
-    setSelectedClient(newClient);
-    setClientSearch(newClient.name);
-    
-    // reset form fields
-    setQuickClientName('');
-    setQuickClientRut('');
-    setQuickClientEmail('');
-    setQuickClientPhone('');
-    setQuickClientCredit(0);
-    setShowQuickClient(false);
-    setErrorMsg(null);
   };
 
   // Calculate block reason
