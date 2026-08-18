@@ -28,7 +28,6 @@ interface FacturacionProps {
   config: BusinessConfig;
   currentUser: any;
   onAddInvoice: (invoice: Invoice) => Promise<void> | void;
-  onAddClient: (client: Client) => void;
   discounts: Discount[];
   users: User[];
 }
@@ -41,7 +40,6 @@ export default function Facturacion({
   config,
   currentUser,
   onAddInvoice,
-  onAddClient,
   discounts = [],
   users = []
 }: FacturacionProps) {
@@ -68,12 +66,6 @@ export default function Facturacion({
   });
 
   // Modals / Flow states
-  const [showQuickClient, setShowQuickClient] = useState(false);
-  const [quickClientName, setQuickClientName] = useState('');
-  const [quickClientRut, setQuickClientRut] = useState('');
-  const [quickClientEmail, setQuickClientEmail] = useState('');
-  const [quickClientPhone, setQuickClientPhone] = useState('');
-  const [quickClientCredit, setQuickClientCredit] = useState(0);
 
   // Generated Invoice state (for receipt modal)
   const [generatedInvoice, setGeneratedInvoice] = useState<Invoice | null>(null);
@@ -271,9 +263,11 @@ export default function Facturacion({
   };
 
   // Filter clients based on search
-  const filteredClients = clients.filter(c => 
-    c.name.toLowerCase().includes(clientSearch.toLowerCase()) || 
-    c.rut.includes(clientSearch)
+  const filteredClients = clients.filter(c =>
+    c.id !== 'c-ocasional' && (
+      c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
+      c.rut.includes(clientSearch)
+    )
   );
 
   // Filter products based on search
@@ -438,40 +432,6 @@ export default function Facturacion({
     }));
   };
 
-  // Quick Client Creation
-  const handleCreateQuickClient = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickClientName || !quickClientRut) {
-      setErrorMsg("Nombre y RUT/NIT son requeridos para la afiliación de clientes.");
-      return;
-    }
-
-    const newClient: Client = {
-      id: `c-${Date.now()}`,
-      name: quickClientName,
-      rut: quickClientRut,
-      email: quickClientEmail || "operaciones@anonimo.net",
-      phone: quickClientPhone || "+57 (300) 000-0000",
-      address: "Zona Franca de Tránsito",
-      creditLimit: 0,
-      outstandingBalance: 0,
-      createdAt: new Date().toISOString()
-    };
-
-    onAddClient(newClient);
-    setSelectedClient(newClient);
-    setClientSearch(newClient.name);
-    
-    // reset form fields
-    setQuickClientName('');
-    setQuickClientRut('');
-    setQuickClientEmail('');
-    setQuickClientPhone('');
-    setQuickClientCredit(0);
-    setShowQuickClient(false);
-    setErrorMsg(null);
-  };
-
   // Calculate block reason
   const blockReason = selectedClient ? getClientBillingBlockReason(selectedClient, invoices) : null;
 
@@ -521,22 +481,12 @@ export default function Facturacion({
       return;
     }
 
-    // Si el cliente no está agregado/seleccionado, que sea cliente ocasional
-    let clientToUse = selectedClient;
-    if (!clientToUse) {
-      const ocasional = clients.find(c => c.id === 'c-ocasional') || {
-        id: "c-ocasional",
-        name: "Cliente Ocasional",
-        rut: "222.222.222-2",
-        email: "ocasional@extremecourier.com",
-        phone: "+57 (300) 000-0000",
-        address: "Venta Directa de Caja",
-        creditLimit: 0,
-        outstandingBalance: 0,
-        createdAt: "2026-01-01T00:00:00-05:00"
-      };
-      clientToUse = ocasional;
+    if (!selectedClient || selectedClient.id === 'c-ocasional') {
+      setErrorMsg("❌ CLIENTE REQUERIDO: Selecciona un cliente registrado antes de facturar.");
+      return;
     }
+
+    const clientToUse = selectedClient;
 
     if (cartItems.length === 0) {
       setErrorMsg("El carro de despacho está vacío. Incorpore insumos.");
@@ -544,10 +494,6 @@ export default function Facturacion({
     }
 
     if (paymentMethod.toLowerCase().includes('cred')) {
-      if (clientToUse.id === 'c-ocasional') {
-        setErrorMsg("❌ CRÉDITO RESTRINGIDO: El Cliente Ocasional no puede realizar compras a crédito.");
-        return;
-      }
       if (!clientToUse.hasCredit) {
         setErrorMsg(`❌ CRÉDITO RESTRINGIDO: El cliente "${clientToUse.name}" no tiene autorizada una línea de crédito.`);
         return;
@@ -651,91 +597,10 @@ export default function Facturacion({
             <h2 className="text-sm font-semibold text-white tracking-wider uppercase font-mono flex items-center gap-2">
               <span className="text-cyber-orange">01.</span> VINCULAR DEUDOR / CLIENTE
             </h2>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => {
-                  const ocasional = clients.find(c => c.id === 'c-ocasional');
-                  if (ocasional) {
-                    setSelectedClient(ocasional);
-                    setClientSearch(ocasional.name);
-                    setErrorMsg(null);
-                  }
-                }}
-                className="bg-cyber-blue/10 hover:bg-cyber-blue text-cyber-blue hover:text-black transition-all border border-cyber-blue/30 text-xs py-1 px-3 rounded-lg flex items-center gap-1.5 font-mono cursor-pointer"
-              >
-                <Users size={14} /> Cliente Ocasional
-              </button>
-              <button 
-                onClick={() => setShowQuickClient(!showQuickClient)}
-                className="bg-cyber-pink/10 hover:bg-cyber-pink text-cyber-pink hover:text-black transition-all border border-cyber-pink/30 text-xs py-1 px-3 rounded-lg flex items-center gap-1.5 font-mono cursor-pointer"
-              >
-                <UserPlus size={14} /> Afiliación Rápida
-              </button>
+            <div className="text-[10px] text-cyber-orange font-mono text-right">
+              Selecciona un cliente previamente registrado.
             </div>
           </div>
-
-          {/* Quick Client Drawer */}
-          {showQuickClient && (
-            <form onSubmit={handleCreateQuickClient} className="bg-slate-900/80 border border-cyber-pink/30 rounded-xl p-4 mb-4 space-y-3 animate-pulse-once">
-              <p className="text-xs text-cyber-pink font-mono font-bold tracking-wider">MODULO DE INSCRIPCIÓN EXTREMA</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input 
-                  type="text" 
-                  placeholder="Nombre o Razón Social" 
-                  value={quickClientName}
-                  onChange={e => setQuickClientName(e.target.value)}
-                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
-                  required
-                />
-                <input 
-                  type="text" 
-                  placeholder="NIT / RUT (Identificación)" 
-                  value={quickClientRut}
-                  onChange={e => setQuickClientRut(e.target.value)}
-                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
-                  required
-                />
-                <input 
-                  type="email" 
-                  placeholder="Email de auditoría" 
-                  value={quickClientEmail}
-                  onChange={e => setQuickClientEmail(e.target.value)}
-                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Teléfono móvil" 
-                  value={quickClientPhone}
-                  onChange={e => setQuickClientPhone(e.target.value)}
-                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
-                />
-                <div className="sm:col-span-2">
-                  <label className="block text-[10px] text-gray-400 font-mono mb-1">CUPO DE CRÉDITO: SOLO ADMINISTRADOR</label>
-                  <input 
-                    type="number" 
-                    value={0} disabled
-                    onChange={e => setQuickClientCredit(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowQuickClient(false)}
-                  className="text-xs text-gray-400 px-3 py-1.5"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  className="bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-bold px-4 py-1.5 rounded-lg font-mono"
-                >
-                  Confirmar Registro
-                </button>
-              </div>
-            </form>
-          )}
 
           {/* Client selection search */}
           <div className="relative">
@@ -790,7 +655,7 @@ export default function Facturacion({
                 ))}
                 {filteredClients.length === 0 && (
                   <div className="p-4 text-center text-xs text-gray-500 font-mono">
-                    Ningún deudor registrado coincide. Use "Afiliación Rápida".
+                    Ningún cliente registrado coincide con la búsqueda.
                   </div>
                 )}
               </div>
