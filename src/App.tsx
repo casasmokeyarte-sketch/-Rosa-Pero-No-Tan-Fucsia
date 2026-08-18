@@ -30,6 +30,7 @@ import {
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
 import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
+import { loginWalletClient, saveWalletSession } from './lib/walletApi';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -697,26 +698,35 @@ export default function App() {
     }
   };
 
-  const handleClientLoginSubmit = (e: React.FormEvent) => {
+  const handleClientLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
-    const clientToLogin = clients.find(
-      c => c.code && c.code.trim().toUpperCase() === clientLoginRut.trim().toUpperCase()
-    );
-    if (!clientToLogin) {
-      setLoginError("CÓDIGO DE CLIENTE NO REGISTRADO: Verifica el código provisto por tu asesor.");
-      return;
-    }
+    try {
+      const result = await loginWalletClient(
+        clientLoginRut.trim(),
+        clientLoginPassword
+      );
+      const clientToLogin = clients.find(
+        client => client.id === result.actor.id
+      );
 
-    const expectedPassword = clientToLogin.password || '1234';
-    if (clientLoginPassword === expectedPassword) {
+      if (!clientToLogin) {
+        setLoginError(
+          "CUENTA NO DISPONIBLE: Actualiza la página e intenta nuevamente."
+        );
+        return;
+      }
+
+      saveWalletSession(clientToLogin.id, result.token);
       setCurrentClient(clientToLogin);
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
-    } else {
-      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida.");
+    } catch {
+      setLoginError(
+        "CREDENCIALES INCORRECTAS O ACCESO TEMPORALMENTE BLOQUEADO. Verifica el código y la contraseña."
+      );
     }
   };
 
