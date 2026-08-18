@@ -59,7 +59,7 @@ const statusLabel = (status: string) => {
   return labels[status] || status;
 };
 
-function OfficialBoldButton({ checkout }: { checkout: BoldCheckout }) {
+export function OfficialBoldButton({ checkout }: { checkout: BoldCheckout }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
