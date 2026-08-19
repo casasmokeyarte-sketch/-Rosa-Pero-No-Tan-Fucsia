@@ -41,6 +41,9 @@ export interface Product {
   userStocks?: { [userId: string]: number }; // Stock of each user
   note?: string; // Observación/Inconsistencia administrativa
   walletEligible?: boolean; // Habilitación explícita para pagos con Bolsillo
+  inventoryMovementStatus?: 'unreviewed' | 'allowed' | 'restricted';
+  inventoryMovementReviewedAt?: string;
+  inventoryMovementReviewedBy?: string;
 }
 
 export interface InvoiceItem {

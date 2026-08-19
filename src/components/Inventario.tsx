@@ -60,6 +60,8 @@ export default function Inventario({
   // States
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+  const [operatorInventoryUserId, setOperatorInventoryUserId] = useState('');
+  const [operatorInventorySearch, setOperatorInventorySearch] = useState('');
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
 
@@ -417,6 +419,40 @@ export default function Inventario({
   };
   const lowStockPersonal = products.filter(p => getPersonalStock(p) <= p.minStock);
 
+  const inventoryOperators = users.filter(
+    user => user.status === 'Activo' && user.id !== 'bodega'
+  );
+
+  const selectedInventoryOperator = inventoryOperators.find(
+    user => user.id === operatorInventoryUserId
+  );
+
+  const normalizedOperatorInventorySearch =
+    operatorInventorySearch.trim().toLowerCase();
+
+  const allowedOperatorInventory = operatorInventoryUserId
+    ? products.filter(product => {
+        if (product.inventoryMovementStatus !== 'allowed') return false;
+
+        const quantity = product.userStocks?.[operatorInventoryUserId] ?? 0;
+        if (quantity <= 0) return false;
+
+        if (!normalizedOperatorInventorySearch) return true;
+
+        return (
+          product.name.toLowerCase().includes(normalizedOperatorInventorySearch) ||
+          product.code.toLowerCase().includes(normalizedOperatorInventorySearch) ||
+          product.category.toLowerCase().includes(normalizedOperatorInventorySearch)
+        );
+      })
+    : [];
+
+  const allowedOperatorInventoryUnits = allowedOperatorInventory.reduce(
+    (total, product) =>
+      total + (product.userStocks?.[operatorInventoryUserId] ?? 0),
+    0
+  );
+
   const pendingTransfersCount = transfers.filter(t => {
     if (t.status !== 'pendiente') return false;
     if (currentUser.role === 'Administrador' && t.destination === 'bodega') return true;
@@ -511,6 +547,139 @@ export default function Inventario({
             </button>
           )}
         </div>
+      )}
+
+      {currentUser.role === 'Administrador' && (
+        <section className="bg-cyber-card border border-cyber-border rounded-xl p-5 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <Users size={17} className="text-cyber-blue" />
+                INVENTARIO PERMITIDO POR OPERADOR
+              </h2>
+              <p className="text-[10px] text-gray-400 font-mono mt-1">
+                Consulta de solo lectura. Los productos restringidos o sin revisar no se muestran.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              <select
+                value={operatorInventoryUserId}
+                onChange={event => {
+                  setOperatorInventoryUserId(event.target.value);
+                  setOperatorInventorySearch('');
+                }}
+                className="bg-slate-950 border border-cyber-border rounded-lg px-3 py-2 text-xs text-white"
+              >
+                <option value="">Seleccionar operador</option>
+                {inventoryOperators.map(user => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName} ({user.role})
+                  </option>
+                ))}
+              </select>
+
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+                />
+                <input
+                  type="search"
+                  value={operatorInventorySearch}
+                  onChange={event => setOperatorInventorySearch(event.target.value)}
+                  disabled={!operatorInventoryUserId}
+                  placeholder="Buscar producto permitido"
+                  className="w-full bg-slate-950 border border-cyber-border rounded-lg pl-9 pr-3 py-2 text-xs text-white disabled:opacity-40"
+                />
+              </div>
+            </div>
+          </div>
+
+          {!selectedInventoryOperator ? (
+            <div className="border border-dashed border-slate-700 rounded-xl p-6 text-center text-xs text-gray-500 font-mono">
+              Selecciona un operador para consultar su inventario permitido.
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                  <p className="text-[9px] text-gray-500 uppercase">Operador</p>
+                  <p className="text-xs font-bold text-white mt-1">
+                    {selectedInventoryOperator.fullName}
+                  </p>
+                </div>
+                <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                  <p className="text-[9px] text-gray-500 uppercase">Referencias permitidas</p>
+                  <p className="text-lg font-extrabold text-cyber-blue">
+                    {allowedOperatorInventory.length}
+                  </p>
+                </div>
+                <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                  <p className="text-[9px] text-gray-500 uppercase">Unidades permitidas</p>
+                  <p className="text-lg font-extrabold text-cyber-pink">
+                    {allowedOperatorInventoryUnits.toLocaleString('es-CO')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-950 text-gray-400 font-mono">
+                    <tr>
+                      <th className="text-left p-3">Código</th>
+                      <th className="text-left p-3">Producto permitido</th>
+                      <th className="text-left p-3">Categoría</th>
+                      <th className="text-right p-3">Cantidad</th>
+                      <th className="text-center p-3">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {allowedOperatorInventory.map(product => {
+                      const quantity =
+                        product.userStocks?.[operatorInventoryUserId] ?? 0;
+                      const isLow = quantity <= product.minStock;
+
+                      return (
+                        <tr key={product.id} className="hover:bg-slate-900/60">
+                          <td className="p-3 font-mono text-gray-400">
+                            {product.code}
+                          </td>
+                          <td className="p-3 font-bold text-white">
+                            {product.name}
+                          </td>
+                          <td className="p-3 text-gray-400">
+                            {product.category}
+                          </td>
+                          <td className="p-3 text-right font-extrabold text-white">
+                            {quantity.toLocaleString('es-CO')} {product.unitType || 'unidad'}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`px-2 py-1 rounded-full text-[9px] font-bold ${
+                                isLow
+                                  ? 'bg-amber-500/10 text-amber-400'
+                                  : 'bg-emerald-500/10 text-emerald-400'
+                              }`}
+                            >
+                              {isLow ? 'STOCK BAJO' : 'DISPONIBLE'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {allowedOperatorInventory.length === 0 && (
+                  <div className="p-6 text-center text-xs text-gray-500 font-mono">
+                    Este operador no tiene productos aprobados para mostrar.
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </section>
       )}
 
       {/* Sub-tabs Selection */}
