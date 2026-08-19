@@ -48,18 +48,35 @@ set search_path = public, pg_temp
 as $$
 declare
   v_previous_status text;
+  v_trusted_role boolean;
 begin
+  v_trusted_role :=
+    current_user in ('postgres', 'service_role', 'supabase_admin');
+
   if tg_op = 'INSERT' then
     v_previous_status := 'unreviewed';
+
+    -- Browser/API callers cannot choose review state or forge audit fields.
+    if not v_trusted_role then
+      new.inventory_movement_status := 'unreviewed';
+      new.inventory_movement_reviewed_at := null;
+      new.inventory_movement_reviewed_by := null;
+    end if;
   else
     v_previous_status :=
       coalesce(old.inventory_movement_status, 'unreviewed');
   end if;
 
+  -- A payment-restricted product is always movement-restricted.
   if coalesce(new.wallet_eligibility_status, '') = 'restricted' then
     new.inventory_movement_status := 'restricted';
     new.inventory_movement_reviewed_at := now();
     new.inventory_movement_reviewed_by := 'system';
+  elsif tg_op = 'UPDATE'
+        and not v_trusted_role
+        and new.inventory_movement_status is distinct from v_previous_status then
+    raise exception
+      'Inventory movement status requires a trusted server role';
   end if;
 
   if new.inventory_movement_status = 'allowed'
@@ -68,18 +85,27 @@ begin
       'Only reviewed eligible products can be allowed for inventory movement';
   end if;
 
-  if new.inventory_movement_status = 'allowed'
-     and new.inventory_movement_status is distinct from v_previous_status
-     and current_user not in ('postgres', 'service_role', 'supabase_admin') then
+  -- Audit metadata cannot be edited independently by browser/API callers.
+  if tg_op = 'UPDATE'
+     and not v_trusted_role
+     and new.inventory_movement_status is not distinct from v_previous_status
+     and (
+       new.inventory_movement_reviewed_at
+         is distinct from old.inventory_movement_reviewed_at
+       or new.inventory_movement_reviewed_by
+         is distinct from old.inventory_movement_reviewed_by
+     ) then
     raise exception
-      'Inventory movement approval requires a trusted server role';
+      'Inventory movement audit metadata is server controlled';
   end if;
 
   if new.inventory_movement_status is distinct from v_previous_status then
     new.inventory_movement_reviewed_at := now();
 
-    if new.inventory_movement_reviewed_by is null
-       or btrim(new.inventory_movement_reviewed_by) = '' then
+    if new.inventory_movement_status = 'restricted'
+       and coalesce(new.wallet_eligibility_status, '') = 'restricted' then
+      new.inventory_movement_reviewed_by := 'system';
+    else
       new.inventory_movement_reviewed_by := current_user;
     end if;
   end if;
@@ -95,6 +121,7 @@ create trigger trg_products_inventory_movement_quarantine
 before insert or update of
   wallet_eligibility_status,
   inventory_movement_status,
+  inventory_movement_reviewed_at,
   inventory_movement_reviewed_by
 on public.products
 for each row
