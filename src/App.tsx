@@ -3590,6 +3590,7 @@ export default function App() {
           {activeTab === 'domicilios' && getUserPermissions(currentUser).domicilios !== false && (
             <Domicilios 
               invoices={invoices}
+              products={products}
               config={config}
               onUpdateInvoice={handleUpdateInvoice}
             />
