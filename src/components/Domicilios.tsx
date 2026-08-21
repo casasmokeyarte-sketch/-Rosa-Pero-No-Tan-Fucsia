@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Invoice, BusinessConfig } from '../types';
+import { Invoice, BusinessConfig, Product } from '../types';
 import CyberEmpty from './CyberEmpty';
 import { 
   Truck, 
@@ -18,14 +18,48 @@ import {
 
 interface DomiciliosProps {
   invoices: Invoice[];
+  products: Product[];
   config: BusinessConfig;
   onUpdateInvoice: (updated: Invoice) => void;
 }
 
-export default function Domicilios({ invoices, config, onUpdateInvoice }: DomiciliosProps) {
+export default function Domicilios({
+  invoices,
+  products,
+  config,
+  onUpdateInvoice
+}: DomiciliosProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'Todos' | 'Pendiente' | 'En Camino' | 'Entregado' | 'Cancelado'>('Todos');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
+
+  const blockedDispatchItems = selectedInvoiceForPrint
+    ? selectedInvoiceForPrint.items.filter(item => {
+        const product = products.find(
+          candidate => candidate.id === item.productId
+        );
+
+        return product?.dispatchEligibilityStatus !== 'allowed';
+      })
+    : [];
+
+  const canPrintSelectedDispatch =
+    Boolean(selectedInvoiceForPrint?.isDelivery) &&
+    blockedDispatchItems.length === 0;
+
+  const updateSelectedGuideField = (
+    field: 'guideName' | 'guideRut' | 'guidePhone' | 'guideAddress' | 'guideNotes',
+    value: string
+  ) => {
+    setSelectedInvoiceForPrint(current =>
+      current ? { ...current, [field]: value } : current
+    );
+  };
+
+  const saveSelectedGuideChanges = () => {
+    if (!selectedInvoiceForPrint) return;
+    onUpdateInvoice(selectedInvoiceForPrint);
+  };
 
   // Get all delivery-related invoices
   const deliveryInvoices = invoices.filter(inv => inv.isDelivery);
@@ -356,107 +390,366 @@ export default function Domicilios({ invoices, config, onUpdateInvoice }: Domici
         </div>
       </div>
 
-      {/* DISPATCH RECEIPT OVERLAY MODAL */}
+      {/* EDITABLE A4 DISPATCH GUIDE */}
       {selectedInvoiceForPrint && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
-          <div className="bg-white text-black p-6 rounded-2xl max-w-sm w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card">
-            
-            {/* Ticket Header */}
-            <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
-              <h3 className="text-sm font-extrabold uppercase">GUÍA DE DESPACHO INTERNO</h3>
-              <p className="text-[10px] font-bold">ROSA FUERTE COURIER</p>
-              <p className="text-[9px]">Soporte de Entrega de Suministros</p>
-            </div>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4 backdrop-blur-sm print-modal-container">
+          <div className="print-card relative mx-auto w-full max-w-5xl rounded-2xl border-4 border-double border-black bg-white p-6 font-mono text-xs text-black shadow-2xl">
 
-            {/* Delivery Core */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1.5">
-              <div className="flex justify-between font-bold">
-                <span>REMITO ORIGINAL:</span>
-                <span>{selectedInvoiceForPrint.invoiceNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>FECHA REGISTRO:</span>
-                <span>{new Date(selectedInvoiceForPrint.createdAt).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>MODALIDAD PAGO:</span>
-                <span className="font-bold">{selectedInvoiceForPrint.paymentMethod}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>ESTADO ACTUAL:</span>
-                <span className="font-bold uppercase text-red-600">{selectedInvoiceForPrint.deliveryStatus}</span>
-              </div>
-            </div>
-
-            {/* Destiny */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
-              <div className="font-bold">DESTINATARIO / ADQUIRIENTE:</div>
-              <div className="uppercase font-bold">{selectedInvoiceForPrint.clientName}</div>
-              <div>RUT/NIT: {selectedInvoiceForPrint.clientRut}</div>
-              <div className="bg-slate-100 p-1 rounded mt-1 font-sans text-[9px] leading-relaxed">
-                📍 <strong>Dirección de entrega:</strong> Venta Directa en Caja / Despacho Coordinado con Agente.
-              </div>
-            </div>
-
-            {/* Delivery Courier Team */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
-              <div className="font-bold">ASIGNACIÓN MENSAJERÍA:</div>
-              <div className="flex justify-between">
-                <span>DOMICILIARIO:</span>
-                <span className="font-bold uppercase">{selectedInvoiceForPrint.deliveryRider || 'ASIGNANDO'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>VEHÍCULO / TRANSPORTE:</span>
-                <span className="font-bold uppercase">{selectedInvoiceForPrint.deliveryTransport || 'No definido'}</span>
-              </div>
-              <div className="flex justify-between border-t border-dashed border-black/30 pt-1 mt-1">
-                <span>FEE DE DOMICILIO:</span>
-                <span className="font-bold text-sm">${(selectedInvoiceForPrint.deliveryFee || 0).toFixed(2)}</span>
-              </div>
-            </div>
-
-            {/* Receipt Summary Totals */}
-            <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1 text-right">
-              <div className="flex justify-between font-bold text-xs">
-                <span>Monto Factura (Insumos):</span>
-                <span>${(selectedInvoiceForPrint.total - (selectedInvoiceForPrint.deliveryFee || 0)).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between font-bold text-sm border-t border-black pt-1">
-                <span>TOTAL A COBRAR EN DESTINO:</span>
-                <span>${selectedInvoiceForPrint.total.toFixed(2)}</span>
-              </div>
-            </div>
-
-            {/* Signature Area */}
-            <div className="py-3 text-center space-y-1 border-t border-dashed border-black">
-              {selectedInvoiceForPrint.clientSignature ? (
-                <div className="space-y-1">
-                  <p className="text-[7px] text-gray-500 uppercase tracking-wider font-bold">Firma Digital del Cliente</p>
-                  <img 
-                    src={selectedInvoiceForPrint.clientSignature} 
-                    alt="Firma del Cliente" 
-                    className="mx-auto max-h-12 bg-white border border-black/10 rounded px-1" 
-                  />
+            <section className="no-print mb-4 rounded-xl border border-slate-300 bg-slate-50 p-4">
+              <div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                <div>
+                  <h2 className="text-sm font-black uppercase">
+                    Editar guía de despacho
+                  </h2>
+                  <p className="text-[10px] text-slate-600">
+                    Revisa los datos del destinatario antes de guardar o imprimir.
+                  </p>
                 </div>
-              ) : (
-                <div className="pt-6 border-b border-black w-2/3 mx-auto"></div>
-              )}
-              <p className="text-[8px] uppercase tracking-wider text-gray-600">Firma de Recibido / Sello de Cliente</p>
-            </div>
 
-            {/* Action buttons inside overlay */}
-            <div className="flex gap-2 mt-4 border-t border-slate-300 pt-4 no-print">
+                <button
+                  type="button"
+                  onClick={saveSelectedGuideChanges}
+                  className="rounded bg-cyan-700 px-4 py-2 text-[10px] font-black text-white hover:bg-cyan-800"
+                >
+                  Guardar datos
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="text-[10px] font-bold">
+                  Destinatario
+                  <input
+                    type="text"
+                    value={
+                      selectedInvoiceForPrint.guideName ||
+                      selectedInvoiceForPrint.clientName
+                    }
+                    onChange={event =>
+                      updateSelectedGuideField('guideName', event.target.value)
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                  />
+                </label>
+
+                <label className="text-[10px] font-bold">
+                  Documento / NIT
+                  <input
+                    type="text"
+                    value={
+                      selectedInvoiceForPrint.guideRut ||
+                      selectedInvoiceForPrint.clientRut
+                    }
+                    onChange={event =>
+                      updateSelectedGuideField('guideRut', event.target.value)
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                  />
+                </label>
+
+                <label className="text-[10px] font-bold">
+                  Teléfono
+                  <input
+                    type="text"
+                    value={selectedInvoiceForPrint.guidePhone || ''}
+                    onChange={event =>
+                      updateSelectedGuideField('guidePhone', event.target.value)
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                  />
+                </label>
+
+                <label className="text-[10px] font-bold">
+                  Dirección completa
+                  <input
+                    type="text"
+                    value={selectedInvoiceForPrint.guideAddress || ''}
+                    onChange={event =>
+                      updateSelectedGuideField('guideAddress', event.target.value)
+                    }
+                    className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                  />
+                </label>
+
+                <label className="text-[10px] font-bold md:col-span-2">
+                  Observaciones e instrucciones
+                  <textarea
+                    value={selectedInvoiceForPrint.guideNotes || ''}
+                    onChange={event =>
+                      updateSelectedGuideField('guideNotes', event.target.value)
+                    }
+                    rows={2}
+                    className="mt-1 w-full resize-y rounded border border-slate-300 bg-white p-2 text-xs"
+                  />
+                </label>
+              </div>
+            </section>
+
+            {!canPrintSelectedDispatch ? (
+              <section className="no-print rounded-xl border-2 border-red-600 bg-red-50 p-5 text-red-800">
+                <h2 className="text-sm font-black uppercase">
+                  Guía bloqueada
+                </h2>
+                <p className="mt-1 text-xs">
+                  Esta guía no puede imprimirse porque contiene artículos
+                  pendientes de revisión o no autorizados para despacho.
+                </p>
+
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-xs">
+                  {blockedDispatchItems.map(item => (
+                    <li key={item.productId}>
+                      {item.productName}: pendiente o restringido
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : (
+              <article className="dispatch-guide-sheet mx-auto w-full bg-white text-black">
+                <header className="border-b-2 border-black pb-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase">
+                        Guía de despacho
+                      </div>
+                      <h1 className="text-2xl font-black">
+                        G-{selectedInvoiceForPrint.invoiceNumber.replace(
+                          /[^A-Za-z0-9]/g,
+                          ''
+                        )}
+                      </h1>
+                    </div>
+
+                    <div className="border border-black px-3 py-1 text-[10px] font-bold">
+                      COPIA CONTROL
+                    </div>
+                  </div>
+                </header>
+
+                <section className="grid grid-cols-[90px_1fr] gap-3 border-b border-black py-3">
+                  <div className="flex h-16 items-center justify-center border border-slate-300 text-center text-[9px] font-black">
+                    LOGO
+                  </div>
+
+                  <div className="text-[10px] leading-tight">
+                    <h2 className="text-sm font-black uppercase">
+                      {config.companyName}
+                    </h2>
+                    <div>NIT: {config.rut}</div>
+                    <div>{config.address}</div>
+                    <div>Teléfono: {config.phone}</div>
+                    <div>{config.email}</div>
+                  </div>
+                </section>
+
+                <section className="flex flex-wrap gap-2 border-b border-black py-2 text-[10px]">
+                  <div className="border border-black px-2 py-1 font-black uppercase">
+                    {selectedInvoiceForPrint.paymentMethod}
+                  </div>
+                  <div className="border border-slate-400 bg-slate-50 px-2 py-1">
+                    Factura: {selectedInvoiceForPrint.invoiceNumber}
+                  </div>
+                  <div className="border border-slate-400 bg-slate-50 px-2 py-1">
+                    Fecha: {
+                      new Date(
+                        selectedInvoiceForPrint.createdAt
+                      ).toLocaleDateString()
+                    }
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-2 py-2 md:grid-cols-2">
+                  <div className="min-h-32 border border-black p-2 text-[10px]">
+                    <h2 className="mb-2 font-black uppercase">
+                      Destinatario
+                    </h2>
+                    <div className="font-bold uppercase">
+                      {
+                        selectedInvoiceForPrint.guideName ||
+                        selectedInvoiceForPrint.clientName
+                      }
+                    </div>
+                    <div>
+                      Documento: {
+                        selectedInvoiceForPrint.guideRut ||
+                        selectedInvoiceForPrint.clientRut
+                      }
+                    </div>
+                    <div>
+                      Teléfono: {
+                        selectedInvoiceForPrint.guidePhone ||
+                        'No registrado'
+                      }
+                    </div>
+                    <div className="mt-1">
+                      Dirección: {
+                        selectedInvoiceForPrint.guideAddress ||
+                        'No registrada'
+                      }
+                    </div>
+                  </div>
+
+                  <div className="min-h-32 border border-black p-2 text-[10px]">
+                    <h2 className="mb-2 font-black uppercase">
+                      Datos del envío
+                    </h2>
+                    <div>Remitente: {config.companyName}</div>
+                    <div>
+                      Responsable: {selectedInvoiceForPrint.cashierName}
+                    </div>
+                    <div>
+                      Mensajero: {
+                        selectedInvoiceForPrint.deliveryRider ||
+                        'Pendiente de asignar'
+                      }
+                    </div>
+                    <div>
+                      Transporte: {
+                        selectedInvoiceForPrint.deliveryTransport ||
+                        'No definido'
+                      }
+                    </div>
+                    <div>
+                      Estado: {selectedInvoiceForPrint.deliveryStatus}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="border border-black">
+                  <h2 className="border-b border-black p-2 text-[10px] font-black uppercase">
+                    Artículos autorizados
+                  </h2>
+
+                  <table className="w-full border-collapse text-left text-[10px]">
+                    <thead>
+                      <tr className="border-b border-black">
+                        <th className="p-2">Artículo</th>
+                        <th className="w-24 p-2 text-right">Cantidad</th>
+                        <th className="w-24 p-2 text-right">Unidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedInvoiceForPrint.items.map(item => (
+                        <tr
+                          key={item.productId}
+                          className="border-b border-slate-300 last:border-0"
+                        >
+                          <td className="p-2">
+                            <div className="font-bold">
+                              {item.productName}
+                            </div>
+                            {item.note && (
+                              <div className="text-[9px] italic text-slate-600">
+                                {item.note}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-2 text-right font-bold">
+                            {item.quantity}
+                          </td>
+                          <td className="p-2 text-right">
+                            {
+                              item.unitType === 'gr'
+                                ? 'g'
+                                : item.unitType === 'ml'
+                                  ? 'ml'
+                                  : item.unitType === 'l'
+                                    ? 'L'
+                                    : 'unidad'
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="grid grid-cols-1 gap-2 py-2 md:grid-cols-2">
+                  <div className="min-h-24 border border-black p-2 text-[10px]">
+                    <h2 className="mb-2 font-black uppercase">
+                      Contenido declarado
+                    </h2>
+                    <p>
+                      {selectedInvoiceForPrint.items
+                        .map(
+                          item =>
+                            `${item.productName} x${item.quantity}`
+                        )
+                        .join(', ')}
+                    </p>
+                  </div>
+
+                  <div className="min-h-24 border border-black p-2 text-[10px]">
+                    <h2 className="mb-2 font-black uppercase">
+                      Nota / instrucciones
+                    </h2>
+                    <p>
+                      {
+                        selectedInvoiceForPrint.guideNotes ||
+                        'Sin observaciones.'
+                      }
+                    </p>
+                  </div>
+                </section>
+
+                <section className="border border-black p-2 text-[10px]">
+                  <h2 className="font-black uppercase">Código de guía</h2>
+                  <div
+                    aria-label={`Código de guía G-${selectedInvoiceForPrint.invoiceNumber}`}
+                    className="mx-auto mt-3 h-14 max-w-sm border-x-8 border-black"
+                    style={{
+                      background:
+                        'repeating-linear-gradient(90deg, #000 0, #000 2px, #fff 2px, #fff 5px)'
+                    }}
+                  />
+                  <div className="mt-1 text-center font-black">
+                    G-{selectedInvoiceForPrint.invoiceNumber.replace(
+                      /[^A-Za-z0-9]/g,
+                      ''
+                    )}
+                  </div>
+                </section>
+
+                <section className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div className="min-h-28 border border-black p-2 text-[10px]">
+                    <h2 className="mb-2 font-black uppercase">
+                      Políticas operativas
+                    </h2>
+                    <ul className="list-disc space-y-1 pl-4">
+                      <li>Verificar destinatario y estado del paquete.</li>
+                      <li>No entregar a terceros sin autorización.</li>
+                      <li>Registrar novedades de la entrega.</li>
+                    </ul>
+                  </div>
+
+                  <div className="min-h-28 border border-black p-2 text-[10px]">
+                    <h2 className="mb-3 font-black uppercase">
+                      Control de entrega
+                    </h2>
+                    <div className="mb-3 border-b border-black">Recibe:</div>
+                    <div className="mb-3 border-b border-black">Documento:</div>
+                    <div className="mb-3 border-b border-black">Fecha:</div>
+                    <div className="border-b border-black">
+                      Observaciones:
+                    </div>
+                  </div>
+                </section>
+              </article>
+            )}
+
+            <div className="no-print mt-4 flex gap-2 border-t border-slate-300 pt-4">
               <button
                 type="button"
                 onClick={handlePrint}
-                className="flex-1 bg-black text-white hover:bg-slate-900 p-2.5 rounded-lg font-bold flex items-center justify-center gap-1.5 font-mono text-xs cursor-pointer"
+                disabled={!canPrintSelectedDispatch}
+                aria-disabled={!canPrintSelectedDispatch}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-black p-2.5 text-xs font-bold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Printer size={14} /> Imprimir Guía
+                <Printer size={14} /> Imprimir guía
               </button>
+
               <button
                 type="button"
                 onClick={() => setSelectedInvoiceForPrint(null)}
-                className="flex-1 bg-red-600 text-white hover:bg-red-700 p-2.5 rounded-lg font-bold flex items-center justify-center font-mono text-xs cursor-pointer"
+                className="flex-1 rounded-lg bg-red-600 p-2.5 text-xs font-bold text-white hover:bg-red-700"
               >
                 Cerrar
               </button>

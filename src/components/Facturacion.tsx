@@ -71,6 +71,29 @@ export default function Facturacion({
   const [generatedInvoice, setGeneratedInvoice] = useState<Invoice | null>(null);
   const [activeTicketTab, setActiveTicketTab] = useState<'invoice' | 'guide'>('invoice');
 
+  const guideBlockedItems = generatedInvoice
+    ? generatedInvoice.items.filter(item => {
+        const product = products.find(
+          candidate => candidate.id === item.productId
+        );
+
+        return product?.dispatchEligibilityStatus !== 'allowed';
+      })
+    : [];
+
+  const canPrintDispatchGuide =
+    Boolean(generatedInvoice?.isDelivery) &&
+    guideBlockedItems.length === 0;
+
+  const updateGeneratedGuideField = (
+    field: 'guideName' | 'guideRut' | 'guidePhone' | 'guideAddress' | 'guideNotes',
+    value: string
+  ) => {
+    setGeneratedInvoice(current =>
+      current ? { ...current, [field]: value } : current
+    );
+  };
+
   // Form errors
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
@@ -1418,7 +1441,7 @@ export default function Facturacion({
            {/* MODAL / OVERLAY: High-fidelity thermal invoice visualizer */}
       {generatedInvoice && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print-modal-container">
-          <div className="bg-white text-black p-6 rounded-2xl max-w-sm w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card">
+          <div className={`bg-white text-black p-6 rounded-2xl w-full font-mono text-xs shadow-2xl relative border-4 border-double border-black print-card ${activeTicketTab === 'guide' ? 'max-w-5xl' : 'max-w-sm'}`}>
             
             {/* Tab selector inside print modal */}
             <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2.5 no-print">
@@ -1605,98 +1628,288 @@ export default function Facturacion({
               </>
             ) : (
               <>
-                {/* GUÍA DE ENVÍO TICKET MODE */}
-                <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
-                  <h3 className="text-sm font-black uppercase tracking-tight">GUÍA DE ENVÍO / DESPACHO</h3>
-                  <p className="text-[10px] font-bold">ROSA FUERTE LOGISTICS</p>
-                  <p className="text-[8px] text-gray-500">Etiqueta de Destino Autorizada</p>
-                </div>
+                {/* GUÍA A4 EDITABLE: solo artículos autorizados */}
+                <div className="no-print mb-4 rounded-xl border border-slate-300 bg-slate-50 p-4">
+                  <div className="mb-3">
+                    <h3 className="text-sm font-black uppercase">
+                      Editar destinatario antes de imprimir
+                    </h3>
+                    <p className="text-[10px] text-slate-600">
+                      Los cambios se aplican inmediatamente a esta guía.
+                    </p>
+                  </div>
 
-                {/* Meta details */}
-                <div className="py-3 border-b border-dashed border-black text-[10px] space-y-1">
-                  <div className="flex justify-between">
-                    <span>NÚMERO GUÍA:</span>
-                    <span className="font-bold">G-{generatedInvoice.invoiceNumber.split('-')[1]}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>FACTURA REF:</span>
-                    <span className="font-bold">{generatedInvoice.invoiceNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>FECHA DESPACHO:</span>
-                    <span>{new Date(generatedInvoice.createdAt).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>MODALIDAD ENVÍO:</span>
-                    <span className="font-bold uppercase">{generatedInvoice.deliveryMethod === 'cliente' ? 'A Cuenta Cliente' : generatedInvoice.deliveryMethod === 'recoge' ? 'Recogida Local' : 'Despacho Oficina'}</span>
-                  </div>
-                </div>
-
-                {/* Sender details */}
-                <div className="py-2.5 border-b border-dashed border-black text-[10px] space-y-0.5">
-                  <div className="font-bold uppercase tracking-wider text-gray-500 text-[8px]">REMITENTE:</div>
-                  <div className="font-bold">{config.companyName}</div>
-                  <div>NIT: {config.rut}</div>
-                  <div>DIRECCIÓN: {config.address}</div>
-                </div>
-
-                {/* Destination info */}
-                <div className="py-2.5 border-b border-dashed border-black text-[10px] space-y-0.5">
-                  <div className="font-bold uppercase tracking-wider text-gray-500 text-[8px]">DESTINATARIO:</div>
-                  <div className="font-extrabold text-xs uppercase">{generatedInvoice.guideName || generatedInvoice.clientName}</div>
-                  <div>NIT/ID: {generatedInvoice.guideRut || generatedInvoice.clientRut}</div>
-                  <div>TEL CONTACTO: {generatedInvoice.guidePhone}</div>
-                  <div className="bg-gray-100 p-2 rounded border border-black/10 mt-1.5 font-bold leading-normal text-[10px]">
-                    📍 DIRECCIÓN ENVÍO: {generatedInvoice.guideAddress}
-                  </div>
-                </div>
-
-                {/* Courier info */}
-                <div className="py-2.5 border-b border-dashed border-black text-[10px] space-y-1">
-                  <div className="flex justify-between">
-                    <span>DOMICILIARIO / MENSAJERO:</span>
-                    <span className="font-bold uppercase">{generatedInvoice.deliveryRider || 'ASIGNANDO'}</span>
-                  </div>
-                  {generatedInvoice.deliveryMethod === 'oficina' && generatedInvoice.deliveryTransport && (
-                    <div className="flex justify-between">
-                      <span>TRANSPORTE / MEDIO:</span>
-                      <span className="font-bold uppercase">{generatedInvoice.deliveryTransport}</span>
-                    </div>
-                  )}
-                  {generatedInvoice.guideNotes && (
-                    <div className="pt-1 mt-1 border-t border-dashed border-black/10">
-                      <span className="font-bold block text-[8px] text-gray-500">OBSERVACIONES:</span>
-                      <p className="text-[9px] italic leading-normal">{generatedInvoice.guideNotes}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Signature conforming print */}
-                <div className="py-3 text-center space-y-1 border-b border-dashed border-black">
-                  {generatedInvoice.clientSignature ? (
-                    <div className="space-y-1">
-                      <p className="text-[7px] text-gray-500 uppercase tracking-wider font-bold">Firma Conformidad Entrega</p>
-                      <img 
-                        src={generatedInvoice.clientSignature} 
-                        alt="Firma del Cliente" 
-                        className="mx-auto max-h-12 bg-white border border-black/10 rounded px-1" 
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label className="text-[10px] font-bold">
+                      Nombre o razón social
+                      <input
+                        type="text"
+                        value={generatedInvoice.guideName || generatedInvoice.clientName}
+                        onChange={event =>
+                          updateGeneratedGuideField('guideName', event.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
                       />
-                    </div>
-                  ) : (
-                    <div className="pt-8 border-b border-black w-2/3 mx-auto"></div>
-                  )}
-                  <p className="text-[8px] uppercase tracking-wider text-gray-600">Firma / Sello de Recibido Conforme</p>
+                    </label>
+
+                    <label className="text-[10px] font-bold">
+                      Documento / NIT
+                      <input
+                        type="text"
+                        value={generatedInvoice.guideRut || generatedInvoice.clientRut}
+                        onChange={event =>
+                          updateGeneratedGuideField('guideRut', event.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                      />
+                    </label>
+
+                    <label className="text-[10px] font-bold">
+                      Teléfono
+                      <input
+                        type="text"
+                        value={generatedInvoice.guidePhone || ''}
+                        onChange={event =>
+                          updateGeneratedGuideField('guidePhone', event.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                      />
+                    </label>
+
+                    <label className="text-[10px] font-bold">
+                      Dirección completa
+                      <input
+                        type="text"
+                        value={generatedInvoice.guideAddress || ''}
+                        onChange={event =>
+                          updateGeneratedGuideField('guideAddress', event.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                      />
+                    </label>
+
+                    <label className="text-[10px] font-bold md:col-span-2">
+                      Observaciones e instrucciones
+                      <textarea
+                        value={generatedInvoice.guideNotes || ''}
+                        onChange={event =>
+                          updateGeneratedGuideField('guideNotes', event.target.value)
+                        }
+                        rows={2}
+                        className="mt-1 w-full resize-y rounded border border-slate-300 bg-white p-2 text-xs"
+                      />
+                    </label>
+                  </div>
                 </div>
 
-                {/* Guide barcode footer */}
-                <div className="text-center py-4 space-y-2">
-                  <div className="flex justify-center my-1.5">
-                    <div className="bg-black text-white px-3 py-1 tracking-[6px] font-mono text-xs font-black">
-                      G-{generatedInvoice.invoiceNumber.split('-')[1]}
-                    </div>
+                {!canPrintDispatchGuide ? (
+                  <div className="no-print rounded-xl border-2 border-red-600 bg-red-50 p-5 text-red-800">
+                    <h3 className="font-black uppercase">
+                      Guía bloqueada
+                    </h3>
+                    <p className="mt-1 text-xs">
+                      Todos los artículos deben estar revisados y autorizados
+                      expresamente para despacho.
+                    </p>
+
+                    <ul className="mt-3 list-disc space-y-1 pl-5 text-xs">
+                      {guideBlockedItems.map(item => (
+                        <li key={item.productId}>
+                          {item.productName}: pendiente o restringido
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <p className="text-[8px] text-gray-550 font-bold uppercase">ROSA FUERTE EXPRESS SECURITY TICKET</p>
-                </div>
+                ) : (
+                  <article className="dispatch-guide-sheet mx-auto w-full bg-white text-black">
+                    <header className="border-b-2 border-black pb-2">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-[10px] font-bold uppercase">
+                            Guía de despacho
+                          </div>
+                          <h2 className="text-2xl font-black">
+                            G-{generatedInvoice.invoiceNumber.replace(/[^A-Za-z0-9]/g, '')}
+                          </h2>
+                        </div>
+
+                        <div className="border border-black px-3 py-1 text-[10px] font-bold">
+                          COPIA CONTROL
+                        </div>
+                      </div>
+                    </header>
+
+                    <section className="grid grid-cols-[90px_1fr] gap-3 border-b border-black py-3">
+                      <div className="flex h-16 items-center justify-center border border-slate-300 text-center text-[9px] font-black">
+                        LOGO
+                      </div>
+
+                      <div className="text-[10px] leading-tight">
+                        <h3 className="text-sm font-black uppercase">
+                          {config.companyName}
+                        </h3>
+                        <div>NIT: {config.rut}</div>
+                        <div>{config.address}</div>
+                        <div>Teléfono: {config.phone}</div>
+                        <div>{config.email}</div>
+                      </div>
+                    </section>
+
+                    <section className="flex flex-wrap gap-2 border-b border-black py-2 text-[10px]">
+                      <div className="border border-black px-2 py-1 font-black uppercase">
+                        {generatedInvoice.paymentMethod}
+                      </div>
+                      <div className="border border-slate-400 bg-slate-50 px-2 py-1">
+                        Factura: {generatedInvoice.invoiceNumber}
+                      </div>
+                      <div className="border border-slate-400 bg-slate-50 px-2 py-1">
+                        Fecha: {new Date(generatedInvoice.createdAt).toLocaleDateString()}
+                      </div>
+                    </section>
+
+                    <section className="grid grid-cols-1 gap-2 py-2 md:grid-cols-2">
+                      <div className="min-h-32 border border-black p-2 text-[10px]">
+                        <h3 className="mb-2 font-black uppercase">
+                          Destinatario
+                        </h3>
+                        <div className="font-bold uppercase">
+                          {generatedInvoice.guideName || generatedInvoice.clientName}
+                        </div>
+                        <div>
+                          Documento: {generatedInvoice.guideRut || generatedInvoice.clientRut}
+                        </div>
+                        <div>Teléfono: {generatedInvoice.guidePhone || 'No registrado'}</div>
+                        <div className="mt-1">
+                          Dirección: {generatedInvoice.guideAddress || 'No registrada'}
+                        </div>
+                      </div>
+
+                      <div className="min-h-32 border border-black p-2 text-[10px]">
+                        <h3 className="mb-2 font-black uppercase">
+                          Datos del envío
+                        </h3>
+                        <div>Remitente: {config.companyName}</div>
+                        <div>Responsable: {generatedInvoice.cashierName}</div>
+                        <div>
+                          Mensajero: {generatedInvoice.deliveryRider || 'Pendiente de asignar'}
+                        </div>
+                        <div>
+                          Modalidad: {
+                            generatedInvoice.deliveryMethod === 'cliente'
+                              ? 'A cuenta del cliente'
+                              : generatedInvoice.deliveryMethod === 'recoge'
+                                ? 'Recogida local'
+                                : 'Despacho por oficina'
+                          }
+                        </div>
+                        {generatedInvoice.deliveryTransport && (
+                          <div>Transporte: {generatedInvoice.deliveryTransport}</div>
+                        )}
+                        <div>Estado: {generatedInvoice.deliveryStatus}</div>
+                      </div>
+                    </section>
+
+                    <section className="border border-black">
+                      <h3 className="border-b border-black p-2 text-[10px] font-black uppercase">
+                        Artículos autorizados
+                      </h3>
+
+                      <table className="w-full border-collapse text-left text-[10px]">
+                        <thead>
+                          <tr className="border-b border-black">
+                            <th className="p-2">Artículo</th>
+                            <th className="w-24 p-2 text-right">Cantidad</th>
+                            <th className="w-24 p-2 text-right">Unidad</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {generatedInvoice.items.map(item => (
+                            <tr key={item.productId} className="border-b border-slate-300 last:border-0">
+                              <td className="p-2">
+                                <div className="font-bold">{item.productName}</div>
+                                {item.note && (
+                                  <div className="text-[9px] italic text-slate-600">
+                                    {item.note}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-2 text-right font-bold">
+                                {item.quantity}
+                              </td>
+                              <td className="p-2 text-right">
+                                {item.unitType === 'gr'
+                                  ? 'g'
+                                  : item.unitType === 'ml'
+                                    ? 'ml'
+                                    : item.unitType === 'l'
+                                      ? 'L'
+                                      : 'unidad'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </section>
+
+                    <section className="grid grid-cols-1 gap-2 py-2 md:grid-cols-2">
+                      <div className="min-h-24 border border-black p-2 text-[10px]">
+                        <h3 className="mb-2 font-black uppercase">
+                          Contenido declarado
+                        </h3>
+                        <p>
+                          {generatedInvoice.items
+                            .map(item => `${item.productName} x${item.quantity}`)
+                            .join(', ')}
+                        </p>
+                      </div>
+
+                      <div className="min-h-24 border border-black p-2 text-[10px]">
+                        <h3 className="mb-2 font-black uppercase">
+                          Nota / instrucciones
+                        </h3>
+                        <p>{generatedInvoice.guideNotes || 'Sin observaciones.'}</p>
+                      </div>
+                    </section>
+
+                    <section className="border border-black p-2 text-[10px]">
+                      <h3 className="font-black uppercase">Código de guía</h3>
+                      <div
+                        aria-label={`Código de guía G-${generatedInvoice.invoiceNumber}`}
+                        className="mx-auto mt-3 h-14 max-w-sm border-x-8 border-black"
+                        style={{
+                          background:
+                            'repeating-linear-gradient(90deg, #000 0, #000 2px, #fff 2px, #fff 5px)'
+                        }}
+                      />
+                      <div className="mt-1 text-center font-black">
+                        G-{generatedInvoice.invoiceNumber.replace(/[^A-Za-z0-9]/g, '')}
+                      </div>
+                    </section>
+
+                    <section className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div className="min-h-28 border border-black p-2 text-[10px]">
+                        <h3 className="mb-2 font-black uppercase">
+                          Políticas operativas
+                        </h3>
+                        <ul className="list-disc space-y-1 pl-4">
+                          <li>Verificar destinatario y estado del paquete.</li>
+                          <li>Registrar novedades de la entrega.</li>
+                          <li>No entregar a terceros sin autorización.</li>
+                        </ul>
+                      </div>
+
+                      <div className="min-h-28 border border-black p-2 text-[10px]">
+                        <h3 className="mb-3 font-black uppercase">
+                          Control de entrega
+                        </h3>
+                        <div className="mb-3 border-b border-black">Recibe:</div>
+                        <div className="mb-3 border-b border-black">Documento:</div>
+                        <div className="mb-3 border-b border-black">Fecha:</div>
+                        <div className="border-b border-black">Observaciones:</div>
+                      </div>
+                    </section>
+                  </article>
+                )}
               </>
             )}
 
@@ -1704,7 +1917,27 @@ export default function Facturacion({
             <div className="flex gap-2 mt-4 border-t border-slate-300 pt-4 no-print">
               <button
                 type="button"
-                onClick={handlePrint}
+                onClick={() => {
+                  if (
+                    activeTicketTab === 'guide' &&
+                    !canPrintDispatchGuide
+                  ) {
+                    setErrorMsg(
+                      "GUÍA BLOQUEADA: Todos los artículos deben estar autorizados para despacho."
+                    );
+                    return;
+                  }
+
+                  handlePrint();
+                }}
+                disabled={
+                  activeTicketTab === 'guide' &&
+                  !canPrintDispatchGuide
+                }
+                aria-disabled={
+                  activeTicketTab === 'guide' &&
+                  !canPrintDispatchGuide
+                }
                 className="flex-1 bg-black text-white hover:bg-slate-900 p-2.5 rounded-lg font-bold flex items-center justify-center gap-1.5 font-mono text-xs cursor-pointer"
               >
                 <Printer size={14} /> Imprimir / PDF

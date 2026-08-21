@@ -363,3 +363,80 @@
     width: 100% !important;
   }
 }
+
+/* Editable A4 dispatch guide */
+.dispatch-guide-sheet {
+  width: 100%;
+  max-width: 190mm;
+  margin: 0 auto;
+  padding: 8mm;
+  background: #fff;
+  color: #000;
+  box-sizing: border-box;
+}
+
+.print-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  .dispatch-guide-sheet {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: #000 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .dispatch-guide-sheet header,
+  .dispatch-guide-sheet section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .dispatch-guide-sheet table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .dispatch-guide-sheet thead {
+    display: table-header-group;
+  }
+
+  .dispatch-guide-sheet tbody {
+    display: table-row-group;
+  }
+
+  .dispatch-guide-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .dispatch-guide-sheet * {
+    color: #000 !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  .print-card:has(.dispatch-guide-sheet) {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}

@@ -227,6 +227,25 @@ export default function Inventario({
     setEditingProduct(null);
   };
 
+  const handleRequestDispatchReview = (product: Product) => {
+    if (product.dispatchEligibilityStatus === 'restricted') {
+      window.alert(
+        'Este producto está restringido. La solicitud debe ser revisada por la administración responsable.'
+      );
+      return;
+    }
+
+    const updatedProduct: Product = {
+      ...product,
+      dispatchEligibilityStatus: 'unreviewed',
+      dispatchReviewRequestedAt: new Date().toISOString(),
+      dispatchReviewRequestedBy:
+        currentUser.fullName || currentUser.username || currentUser.id
+    };
+
+    onUpdateProduct(updatedProduct);
+  };
+
   // Confirm delete product
   const handleConfirmDeleteProduct = (productId: string) => {
     const prod = products.find(p => p.id === productId);
@@ -693,6 +712,54 @@ export default function Inventario({
                           >
                             <History size={8} /> Ver Historial
                           </button>
+                        </div>
+                        {/* SOLICITUD DE REVISIÓN DE DESPACHO */}
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-2 text-[9px] font-mono">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-gray-500 uppercase">
+                              Estado de despacho
+                            </span>
+                            <span className={`rounded border px-1.5 py-0.5 font-bold uppercase ${
+                              p.dispatchEligibilityStatus === 'allowed'
+                                ? 'border-green-500/30 bg-green-500/10 text-green-400'
+                                : p.dispatchEligibilityStatus === 'restricted'
+                                  ? 'border-red-500/30 bg-red-500/10 text-red-400'
+                                  : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                            }`}>
+                              {p.dispatchEligibilityStatus === 'allowed'
+                                ? 'Permitido'
+                                : p.dispatchEligibilityStatus === 'restricted'
+                                  ? 'Restringido'
+                                  : 'Pendiente'}
+                            </span>
+                          </div>
+
+                          {p.dispatchReviewRequestedAt && (
+                            <div className="mb-1.5 text-[8px] leading-tight text-gray-500">
+                              Solicitado por {p.dispatchReviewRequestedBy || 'usuario'} ·{' '}
+                              {new Date(
+                                p.dispatchReviewRequestedAt
+                              ).toLocaleString()}
+                            </div>
+                          )}
+
+                          {p.dispatchEligibilityStatus !== 'allowed' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRequestDispatchReview(p)}
+                              disabled={
+                                p.dispatchEligibilityStatus === 'restricted' ||
+                                Boolean(p.dispatchReviewRequestedAt)
+                              }
+                              className="w-full rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[8px] font-bold uppercase text-amber-300 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                              {p.dispatchEligibilityStatus === 'restricted'
+                                ? 'Revisión administrativa requerida'
+                                : p.dispatchReviewRequestedAt
+                                  ? 'Revisión solicitada'
+                                  : 'Solicitar revisión'}
+                            </button>
+                          )}
                         </div>
                         {currentUser.role === 'Administrador' && (
                           <div className="flex gap-1.5 pt-1">

@@ -41,6 +41,11 @@ export interface Product {
   userStocks?: { [userId: string]: number }; // Stock of each user
   note?: string; // Observación/Inconsistencia administrativa
   walletEligible?: boolean; // Habilitación explícita para pagos con Bolsillo
+  dispatchEligibilityStatus?: 'unreviewed' | 'allowed' | 'restricted';
+  dispatchReviewedAt?: string;
+  dispatchReviewedBy?: string;
+  dispatchReviewRequestedAt?: string;
+  dispatchReviewRequestedBy?: string;
 }
 
 export interface InvoiceItem {
