@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User, getClientBillingBlockReason } from '../types';
 import CyberEmpty from './CyberEmpty';
+import VerifiedAddressInput, { VerifiedAddressSelection } from './VerifiedAddressInput';
 import { 
   ShoppingCart, 
   UserPlus, 
@@ -111,7 +112,16 @@ export default function Facturacion({
   const [guideRut, setGuideRut] = useState('');
   const [guidePhone, setGuidePhone] = useState('');
   const [guideAddress, setGuideAddress] = useState('');
+  const [verifiedGuideAddress, setVerifiedGuideAddress] = useState<VerifiedAddressSelection | null>(null);
   const [guideNotes, setGuideNotes] = useState('Suministros logísticos Rosa Fuerte');
+
+  const handleGuideAddressChange = React.useCallback((value: string) => {
+    setGuideAddress(value);
+  }, []);
+
+  const handleVerifiedGuideAddressChange = React.useCallback((selection: VerifiedAddressSelection | null) => {
+    setVerifiedGuideAddress(selection);
+  }, []);
 
   // Client Digital Signature states & handlers
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
@@ -180,11 +190,13 @@ export default function Facturacion({
       setGuideRut(selectedClient.rut);
       setGuidePhone(selectedClient.phone);
       setGuideAddress(selectedClient.address);
+      setVerifiedGuideAddress(null);
     } else {
       setGuideName('');
       setGuideRut('');
       setGuidePhone('');
       setGuideAddress('');
+      setVerifiedGuideAddress(null);
     }
   }, [selectedClient]);
 
@@ -198,7 +210,7 @@ export default function Facturacion({
         setDeliveryFee(0);
         setDeliveryRider('Recoge Cliente');
       } else {
-        setDeliveryFee(5.00); // Default local office fee
+        setDeliveryFee(0); // El asesor define el valor según dirección y horario
         setDeliveryRider('');
       }
     }
@@ -516,6 +528,11 @@ export default function Facturacion({
       return;
     }
 
+    if (isDelivery && deliveryMethod !== 'recoge' && !verifiedGuideAddress) {
+      setErrorMsg("❌ DIRECCIÓN SIN VALIDAR: Escriba la dirección y seleccione una opción real de Google antes de despachar.");
+      return;
+    }
+
     if (paymentMethod.toLowerCase().includes('cred')) {
       if (!clientToUse.hasCredit) {
         setErrorMsg(`❌ CRÉDITO RESTRINGIDO: El cliente "${clientToUse.name}" no tiene autorizada una línea de crédito.`);
@@ -570,6 +587,8 @@ export default function Facturacion({
       guideRut: isDelivery ? guideRut.trim() : undefined,
       guidePhone: isDelivery ? guidePhone.trim() : undefined,
       guideAddress: isDelivery ? guideAddress.trim() : undefined,
+      deliveryAddressPlaceId: isDelivery && deliveryMethod !== 'recoge' ? verifiedGuideAddress?.placeId : undefined,
+      deliveryAddressVerified: isDelivery ? deliveryMethod === 'recoge' || Boolean(verifiedGuideAddress) : undefined,
       guideNotes: isDelivery ? guideNotes.trim() : undefined
     };
 
@@ -593,6 +612,7 @@ export default function Facturacion({
       setDeliveryFee(0);
       setDeliveryRider('');
       setDeliveryTransport('Motocicleta');
+      setVerifiedGuideAddress(null);
       setSignatureDataUrl('');
     } catch (error) {
       console.error('Invoice checkout failed:', error);
@@ -1191,13 +1211,10 @@ export default function Facturacion({
 
                 <div className="space-y-1">
                   <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Dirección de Entrega:</label>
-                  <input
-                    type="text"
+                  <VerifiedAddressInput
                     value={guideAddress}
-                    onChange={e => setGuideAddress(e.target.value)}
-                    placeholder="Dirección..."
-                    className="bg-cyber-bg border border-cyber-border text-white text-xs p-2.5 rounded-lg w-full focus:outline-none glow-border-pink font-sans"
-                    required={isDelivery}
+                    onChange={handleGuideAddressChange}
+                    onVerifiedChange={handleVerifiedGuideAddressChange}
                   />
                 </div>
 

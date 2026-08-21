@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import BolsilloCliente from './BolsilloCliente';
 import AyudaCliente from './AyudaCliente';
+import VerifiedAddressInput, { VerifiedAddressSelection } from './VerifiedAddressInput';
 import { fetchWallet, getWalletSession, purchaseWithWallet } from '../lib/walletApi';
-import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
+import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, Discount, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
   Truck, 
@@ -42,6 +43,7 @@ interface PortalClienteProps {
   products: Product[];
   invoices: Invoice[];
   config: BusinessConfig;
+  discounts: Discount[];
   onAddInvoice: (invoice: Invoice) => void;
   onLogout: () => void;
   chatMessages: ChatMessage[];
@@ -67,6 +69,7 @@ export default function PortalCliente({
   products, 
   invoices, 
   config, 
+  discounts = [],
   onAddInvoice, 
   onLogout,
   chatMessages,
@@ -255,6 +258,7 @@ export default function PortalCliente({
   const [deliveryRider, setDeliveryRider] = useState('Mensajero Central');
   const [deliveryTransport, setDeliveryTransport] = useState('Motocicleta');
   const [deliveryAddress, setDeliveryAddress] = useState(client.address || 'Hangar Principal de Enlace');
+  const [verifiedDeliveryAddress, setVerifiedDeliveryAddress] = useState<VerifiedAddressSelection | null>(null);
 
   // Delivery and Payment configurations
   const [deliveryMethod, setDeliveryMethod] = useState<'oficina' | 'cliente' | 'recoge'>('oficina');
@@ -295,7 +299,8 @@ export default function PortalCliente({
   // Cart math
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const cartTax = 0; // IVA de 19% eliminado para compras web
-  const deliveryCost = deliveryMethod === 'oficina' ? 15000.00 : 0.00; // Surcharge only applies if delivery is by office
+  // El domicilio de la oficina se cotiza después por un asesor según dirección y horario.
+  const deliveryCost = 0;
 
   // Dynamic card payment fee
   const cardFee = config.cardFeeEnabled && paymentOption === 'bold'
@@ -318,7 +323,59 @@ export default function PortalCliente({
     }
   }, [client, cart, cartSubtotal]);
 
-  const cartTotal = Math.max(0, cartSubtotal - clientDiscount) + cartTax + deliveryCost + cardFee;
+  const firstWebPurchase = useMemo(() => !invoices.some(invoice =>
+    invoice.clientId === client.id &&
+    invoice.cashierName === 'Portal Online' &&
+    invoice.paymentStatus !== 'Anulada'
+  ), [client.id, invoices]);
+
+  const webPromotion = useMemo(() => {
+    const now = new Date();
+    const today = now.toLocaleDateString('en-CA');
+    const currentTime = now.toTimeString().slice(0, 5);
+    const day = now.getDay();
+    const eligibleBase = cart
+      .reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+
+    if (eligibleBase <= 0) return null;
+
+    return discounts
+      .filter(promo => {
+        if (!promo.active) return false;
+        if (!['todos', 'web', 'primera_compra_web'].includes(promo.appliesTo)) return false;
+        if (promo.appliesTo === 'primera_compra_web' && !firstWebPurchase) return false;
+        if (promo.startDate && today < promo.startDate) return false;
+        if (promo.endDate && today > promo.endDate) return false;
+        if (promo.startTime && currentTime < promo.startTime) return false;
+        if (promo.endTime && currentTime > promo.endTime) return false;
+        if (promo.activeDays?.length && !promo.activeDays.includes(day)) return false;
+        return true;
+      })
+      .map(promo => ({
+        promo,
+        amount: promo.type === 'porcentaje'
+          ? Math.min(eligibleBase, eligibleBase * Math.min(100, Math.max(0, promo.value)) / 100)
+          : Math.min(eligibleBase, Math.max(0, promo.value))
+      }))
+      .sort((a, b) => b.amount - a.amount)[0] || null;
+  }, [cart, discounts, firstWebPurchase]);
+
+  // Los descuentos no se acumulan: se conserva el mayor beneficio válido.
+  const effectiveDiscount = Math.max(clientDiscount, webPromotion?.amount || 0);
+  const effectiveDiscountName = webPromotion && webPromotion.amount >= clientDiscount
+    ? webPromotion.promo.name
+    : clientDiscount > 0
+    ? 'Descuento especial del cliente'
+    : null;
+  const cartTotal = Math.max(0, cartSubtotal - effectiveDiscount) + cartTax + deliveryCost + cardFee;
+
+  const handleDeliveryAddressChange = useCallback((address: string) => {
+    setDeliveryAddress(address);
+  }, []);
+
+  const handleVerifiedDeliveryAddressChange = useCallback((selection: VerifiedAddressSelection | null) => {
+    setVerifiedDeliveryAddress(selection);
+  }, []);
 
   const prepareWalletCheckout = async () => {
     setPaymentOption('wallet');
@@ -415,7 +472,7 @@ export default function PortalCliente({
       clientRut: client.rut,
       items: invoiceItems,
       subtotal: cartSubtotal,
-      discount: 0,
+      discount: effectiveDiscount,
       taxRate: 0,
       taxAmount: 0,
       total: cartTotal,
@@ -431,6 +488,8 @@ export default function PortalCliente({
       deliveryStatus: 'Pendiente',
       deliveryMethod: deliveryMethod,
       guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress,
+      deliveryAddressPlaceId: deliveryMethod === 'recoge' ? undefined : verifiedDeliveryAddress?.placeId,
+      deliveryAddressVerified: deliveryMethod === 'recoge' ? true : Boolean(verifiedDeliveryAddress),
       cardFee: cardFee > 0 ? cardFee : undefined
     };
 
@@ -463,6 +522,11 @@ export default function PortalCliente({
   };
 
   const submitWalletPurchase = async () => {
+    if (deliveryMethod !== 'recoge' && !verifiedDeliveryAddress) {
+      setWalletCheckoutError('Selecciona una dirección válida desde las sugerencias de Google.');
+      return;
+    }
+
     const token = getWalletSession(client.id);
     if (!token) {
       setWalletCheckoutError('Primero inicia la sesión segura en Mi Bolsillo.');
@@ -557,6 +621,8 @@ export default function PortalCliente({
         deliveryStatus: 'Pendiente',
         deliveryMethod,
         guideAddress: deliveryMethod === 'recoge' ? 'N/A (Retira en Oficina)' : deliveryAddress,
+        deliveryAddressPlaceId: deliveryMethod === 'recoge' ? undefined : verifiedDeliveryAddress?.placeId,
+        deliveryAddressVerified: deliveryMethod === 'recoge' ? true : Boolean(verifiedDeliveryAddress),
         walletPaidAmount: Number(serverInvoice.wallet_paid_amount),
         amountDue: Number(serverInvoice.amount_due)
       };
@@ -603,6 +669,12 @@ export default function PortalCliente({
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0 || walletCheckoutLoading) return;
+
+    if (deliveryMethod !== 'recoge' && !verifiedDeliveryAddress) {
+      showToast('Selecciona una dirección válida desde las sugerencias antes de continuar.', 'error');
+      setCheckoutStep('shipping');
+      return;
+    }
 
     if (paymentOption === 'credit') {
       const availableCredit = client.creditLimit - client.outstandingBalance;
@@ -1343,13 +1415,10 @@ export default function PortalCliente({
                             {deliveryMethod !== 'recoge' && (
                               <div className="space-y-1">
                                 <label className="block text-[9px] text-gray-400 uppercase tracking-wider">📍 Dirección de Despacho:</label>
-                                <input 
-                                  type="text" 
+                                <VerifiedAddressInput
                                   value={deliveryAddress}
-                                  onChange={e => setDeliveryAddress(e.target.value)}
-                                  className="bg-cyber-bg border border-cyber-border text-white text-xs p-2 rounded-lg w-full focus:outline-none glow-border-pink font-sans text-xs"
-                                  placeholder="Ingrese dirección destino..."
-                                  required
+                                  onChange={handleDeliveryAddressChange}
+                                  onVerifiedChange={handleVerifiedDeliveryAddressChange}
                                 />
                               </div>
                             )}
@@ -1371,9 +1440,14 @@ export default function PortalCliente({
                                 <div className="space-y-1">
                                   <label className="block text-[9px] text-gray-400 uppercase tracking-wider">Tarifa Envío:</label>
                                   <div className="bg-slate-900 border border-slate-800 text-white text-xs p-2 rounded-lg w-full text-center font-bold">
-                                    $15.000 COP
+                                    Por cotizar
                                   </div>
                                 </div>
+                              </div>
+                            )}
+                            {deliveryMethod === 'oficina' && (
+                              <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5 text-[10px] text-amber-100 leading-relaxed">
+                                El domicilio suele estar entre $10.000 y $30.000 COP. El asesor confirmará el valor final según la dirección y el horario antes de cobrarlo.
                               </div>
                             )}
                           </div>
@@ -1389,7 +1463,7 @@ export default function PortalCliente({
                           </button>
                           <button
                             type="button"
-                            disabled={deliveryMethod !== 'recoge' && !deliveryAddress.trim()}
+                            disabled={deliveryMethod !== 'recoge' && !verifiedDeliveryAddress}
                             onClick={() => setCheckoutStep('payment')}
                             className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                           >
@@ -1515,10 +1589,16 @@ export default function PortalCliente({
                               <span>IVA (0%):</span>
                               <span className="text-white">$0 COP</span>
                             </div>
+                            {effectiveDiscount > 0 && (
+                              <div className="flex justify-between text-emerald-300">
+                                <span>Promoción: {effectiveDiscountName}</span>
+                                <span className="font-bold">-${effectiveDiscount.toLocaleString('es-CO')} COP</span>
+                              </div>
+                            )}
                             {deliveryMethod === 'oficina' && (
                               <div className="flex justify-between text-cyber-orange">
-                                <span>Recargo Domicilio:</span>
-                                <span className="font-bold">+$15.000 COP</span>
+                                <span>Domicilio:</span>
+                                <span className="font-bold">Pendiente de cotización</span>
                               </div>
                             )}
                             {config.cardFeeEnabled && paymentOption === 'bold' && (
@@ -1528,7 +1608,7 @@ export default function PortalCliente({
                               </div>
                             )}
                             <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1.5 text-xs text-white font-extrabold">
-                              <span>TOTAL A LIQUIDAR:</span>
+                              <span>{deliveryMethod === 'oficina' ? 'SUBTOTAL SIN DOMICILIO:' : 'TOTAL A LIQUIDAR:'}</span>
                               <span className="text-cyber-pink">${cartTotal.toLocaleString('es-CO')} COP</span>
                             </div>
                           </div>
