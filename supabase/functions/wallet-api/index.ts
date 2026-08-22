@@ -1,3 +1,4 @@
+/// <reference lib="deno.ns" />
 import { createClient } from "npm:@supabase/supabase-js@2.110.0";
 
 type ActorType = "operator" | "client";
@@ -187,6 +188,15 @@ function walletOrderReference(): string {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = bytesToHex(crypto.getRandomValues(new Uint8Array(8))).toUpperCase();
   return `WAL-${timestamp}-${random}`;
+}
+
+function webBoldOrderReference(): string {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = bytesToHex(
+    crypto.getRandomValues(new Uint8Array(8))
+  ).toUpperCase();
+
+  return `WEB-${timestamp}-${random}`;
 }
 
 async function parseJson(req: Request): Promise<Record<string, unknown>> {
@@ -559,6 +569,110 @@ async function handleAuthenticated(
     });
   }
 
+  if (req.method === "GET" && route === "/products/dispatch-review") {
+    requireAdministrator(session);
+
+    const { data, error } = await admin
+      .from("products")
+      .select(
+        "id,code,name,category,dispatch_eligibility_status,dispatch_reviewed_at,dispatch_reviewed_by,dispatch_review_requested_at,dispatch_review_requested_by",
+      )
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+
+    const products = (data ?? []).map((product) => ({
+      ...product,
+      automatically_restricted:
+        isAutomaticallyRestrictedProduct(product),
+    }));
+
+    return response(origin, 200, { ok: true, products });
+  }
+
+  if (req.method === "PATCH" && route === "/products/dispatch-review") {
+    requireAdministrator(session);
+
+    const body = await parseJson(req);
+    const productId = requiredString(
+      body.product_id,
+      "product_id",
+      120,
+    );
+    const status = requiredString(body.status, "status", 20);
+    const reviewNote = requiredString(
+      body.review_note,
+      "review_note",
+      500,
+    );
+
+    if (!["allowed", "restricted"].includes(status)) {
+      throw new Error("status must be allowed or restricted");
+    }
+
+    if (reviewNote.length < 10) {
+      throw new Error(
+        "review_note must contain at least 10 characters",
+      );
+    }
+
+    const { data: currentProduct, error: fetchError } =
+      await admin
+        .from("products")
+        .select("id,code,name,category")
+        .eq("id", productId)
+        .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (!currentProduct) {
+      return response(origin, 404, {
+        ok: false,
+        error: "Producto no encontrado.",
+      });
+    }
+
+    const automaticallyRestricted =
+      isAutomaticallyRestrictedProduct(currentProduct);
+
+    if (status === "allowed" && automaticallyRestricted) {
+      return response(origin, 409, {
+        ok: false,
+        error:
+          "Este producto requiere control especial y no puede autorizarse automáticamente para despacho.",
+      });
+    }
+
+    const reviewedAt = new Date().toISOString();
+
+    const { data: updatedProduct, error: updateError } =
+      await admin
+        .from("products")
+        .update({
+          dispatch_eligibility_status: status,
+          dispatch_reviewed_at: reviewedAt,
+          dispatch_reviewed_by: session.user_id,
+          dispatch_review_requested_at: null,
+          dispatch_review_requested_by: null,
+        })
+        .eq("id", productId)
+        .select(
+          "id,code,name,category,dispatch_eligibility_status,dispatch_reviewed_at,dispatch_reviewed_by,dispatch_review_requested_at,dispatch_review_requested_by",
+        )
+        .single();
+
+    if (updateError) throw updateError;
+
+    return response(origin, 200, {
+      ok: true,
+      product: {
+        ...updatedProduct,
+        review_note: reviewNote,
+        automatically_restricted: automaticallyRestricted,
+      },
+    });
+  }
+
   if (req.method === "GET" && route === "/wallet") {
     const clientId = clientIdForRequest(session, url);
     const wallet = await walletSummary(clientId);
@@ -607,6 +721,200 @@ async function handleAuthenticated(
     return response(origin, 200, { ok: true, wallet: await walletSummary(clientId) });
   }
 
+  if (req.method === "POST" && route === "/operator/wallet/purchase") {
+    requireOperator(session);
+
+    const body = await parseJson(req);
+    const clientId = requiredString(body.client_id, "client_id", 120);
+    const clientCode = requiredString(body.client_code, "client_code", 120);
+    const clientPassword = requiredString(
+      body.client_password,
+      "client_password",
+      200,
+    );
+    const invoiceId = requiredString(body.invoice_id, "invoice_id", 120);
+    const invoiceNumber = requiredString(
+      body.invoice_number,
+      "invoice_number",
+      120,
+    );
+    const idempotencyKey = requiredString(
+      body.idempotency_key,
+      "idempotency_key",
+      160,
+    );
+    const walletAmount = requiredPositiveAmount(
+      body.wallet_amount,
+      "wallet_amount",
+    );
+    const remainingPaymentMethod = optionalString(
+      body.remaining_payment_method,
+      80,
+    ) ?? "";
+
+    const deliveryFee = body.delivery_fee === null ||
+        body.delivery_fee === undefined
+      ? 0
+      : Number(body.delivery_fee);
+
+    if (
+      !Number.isFinite(deliveryFee) ||
+      deliveryFee < 0 ||
+      deliveryFee > 500000
+    ) {
+      throw new Error("delivery_fee is outside the allowed range");
+    }
+
+    if (
+      !Array.isArray(body.items) ||
+      body.items.length === 0 ||
+      body.items.length > 100
+    ) {
+      throw new Error("items must contain between 1 and 100 products");
+    }
+
+    const deliveryMethod =
+      optionalString(body.delivery_method, 30) ?? "recoge";
+
+    if (!["oficina", "cliente", "recoge"].includes(deliveryMethod)) {
+      throw new Error("Unsupported delivery method");
+    }
+
+    const activeShift = await activeShiftForOperator(session);
+    const normalizedIdentifier = clientCode.toLowerCase();
+    const identifierHash = await sha256Hex(
+      `${normalizedIdentifier}:${sessionPepper}`,
+    );
+    const ipHash = await sha256Hex(
+      `${clientIp(req)}:${sessionPepper}`,
+    );
+    const since = new Date(
+      Date.now() - LOGIN_WINDOW_MINUTES * 60_000,
+    ).toISOString();
+
+    const [identifierFailures, ipFailures] = await Promise.all([
+      failureCount("identifier_hash", identifierHash, since),
+      failureCount("ip_hash", ipHash, since),
+    ]);
+
+    if (
+      identifierFailures >= LOGIN_IDENTIFIER_LIMIT ||
+      ipFailures >= LOGIN_IP_LIMIT
+    ) {
+      await recordAuthEvent({
+        event_type: "rate_limited",
+        actor_type: "client",
+        identifier_hash: identifierHash,
+        ip_hash: ipHash,
+      });
+
+      return response(origin, 429, {
+        ok: false,
+        error: "Intenta nuevamente más tarde.",
+      });
+    }
+
+    const { data: credentialData, error: credentialError } =
+      await admin.rpc("wallet_verify_client_credentials", {
+        p_code: clientCode,
+        p_password: clientPassword,
+      });
+
+    if (credentialError) throw credentialError;
+
+    const clientActor = Array.isArray(credentialData)
+      ? credentialData[0]
+      : null;
+
+    if (!clientActor || clientActor.actor_id !== clientId) {
+      await recordAuthEvent({
+        event_type: "login_failure",
+        actor_type: "client",
+        identifier_hash: identifierHash,
+        ip_hash: ipHash,
+      });
+
+      return response(origin, 401, {
+        ok: false,
+        error: "El cliente no autorizó el uso de su Bolsillo.",
+      });
+    }
+
+    const temporaryToken = randomToken();
+    const temporaryTokenHash = await sha256Hex(
+      `${temporaryToken}:${sessionPepper}`,
+    );
+    const authorizationExpiresAt = new Date(
+      Date.now() + 5 * 60_000,
+    ).toISOString();
+
+    const { data: authorizationSession, error: authorizationError } =
+      await admin
+        .from("wallet_auth_sessions")
+        .insert({
+          token_hash: temporaryTokenHash,
+          actor_type: "client",
+          user_id: null,
+          client_id: clientId,
+          actor_role: clientActor.actor_role,
+          expires_at: authorizationExpiresAt,
+          metadata: {
+            purpose: "operator_wallet_purchase",
+            invoice_id: invoiceId,
+            operator_user_id: session.user_id,
+            shift_id: activeShift.id,
+          },
+        })
+        .select("id")
+        .single();
+
+    if (authorizationError) throw authorizationError;
+
+    try {
+      const { data, error } = await admin.rpc(
+        "wallet_operator_purchase_invoice",
+        {
+          p_client_id: clientId,
+          p_invoice_id: invoiceId,
+          p_invoice_number: invoiceNumber,
+          p_items: body.items,
+          p_delivery_fee: deliveryFee,
+          p_delivery_method: deliveryMethod,
+          p_delivery_address: optionalString(
+            body.delivery_address,
+            500,
+          ),
+          p_wallet_amount: walletAmount,
+          p_idempotency_key: idempotencyKey,
+          p_session_id: session.id,
+          p_client_session_id: authorizationSession.id,
+          p_operator_user_id: session.user_id,
+          p_shift_id: activeShift.id,
+          p_remaining_payment_method: remainingPaymentMethod,
+        },
+      );
+
+      if (error) throw error;
+
+      return response(origin, 201, { ok: true, ...data });
+    } finally {
+      const { error: revokeError } = await admin
+        .from("wallet_auth_sessions")
+        .update({
+          revoked_at: new Date().toISOString(),
+          revoked_reason: "operator_wallet_purchase_consumed",
+        })
+        .eq("id", authorizationSession.id);
+
+      if (revokeError) {
+        console.error(
+          "operator_wallet_authorization_revoke_failed",
+          revokeError.code,
+        );
+      }
+    }
+  }
+
   if (req.method === "POST" && route === "/wallet/purchase") {
     if (session.actor_type !== "client" || !session.client_id) {
       throw new Error("FORBIDDEN");
@@ -649,6 +957,146 @@ async function handleAuthenticated(
     return response(origin, 201, { ok: true, ...data });
   }
 
+  if (req.method === "POST" && route === "/web/bold-payment-intent") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    if (!boldConfigurationReady()) {
+      throw new Error("BOLD_NOT_CONFIGURED");
+    }
+
+    const body = await parseJson(req);
+    const invoiceId = requiredString(
+      body.invoice_id,
+      "invoice_id",
+      120,
+    );
+    const invoiceNumber = requiredString(
+      body.invoice_number,
+      "invoice_number",
+      120,
+    );
+    const idempotencyKey = requiredString(
+      body.idempotency_key,
+      "idempotency_key",
+      160,
+    );
+
+    if (
+      !Array.isArray(body.items) ||
+      body.items.length < 1 ||
+      body.items.length > 100
+    ) {
+      throw new Error(
+        "items must contain between 1 and 100 products",
+      );
+    }
+
+    const deliveryFee =
+      body.delivery_fee === null ||
+        body.delivery_fee === undefined
+        ? 0
+        : Number(body.delivery_fee);
+
+    if (
+      !Number.isFinite(deliveryFee) ||
+      deliveryFee < 0 ||
+      deliveryFee > 500000
+    ) {
+      throw new Error(
+        "delivery_fee is outside the allowed range",
+      );
+    }
+
+    const deliveryMethod =
+      optionalString(body.delivery_method, 30) ?? "recoge";
+
+    if (
+      !["oficina", "cliente", "recoge"].includes(
+        deliveryMethod,
+      )
+    ) {
+      throw new Error("Unsupported delivery method");
+    }
+
+    const orderReference = webBoldOrderReference();
+    const expiresAt = new Date(
+      Date.now() + BOLD_INTENT_HOURS * 3_600_000,
+    ).toISOString();
+
+    const { data, error } = await admin.rpc(
+      "web_bold_create_payment_intent",
+      {
+        p_client_id: session.client_id,
+        p_invoice_id: invoiceId,
+        p_invoice_number: invoiceNumber,
+        p_items: body.items,
+        p_delivery_fee: deliveryFee,
+        p_delivery_method: deliveryMethod,
+        p_delivery_address: optionalString(
+          body.delivery_address,
+          500,
+        ),
+        p_idempotency_key: idempotencyKey,
+        p_order_reference: orderReference,
+        p_session_id: session.id,
+        p_expires_at: expiresAt,
+      },
+    );
+
+    if (error) throw error;
+
+    const result =
+      typeof data === "object" && data !== null
+        ? data as Record<string, unknown>
+        : null;
+
+    if (!result) {
+      throw new Error(
+        "Failed to create direct Bold payment intent",
+      );
+    }
+
+    const intentValue = result.intent;
+    const intent =
+      typeof intentValue === "object" &&
+        intentValue !== null
+        ? intentValue as Record<string, unknown>
+        : null;
+
+    if (!intent) {
+      throw new Error(
+        "Direct Bold payment intent was not returned",
+      );
+    }
+
+    const finalReference = requiredString(
+      intent.order_reference,
+      "order_reference",
+      60,
+    );
+    const finalAmount = requiredBoldAmount(intent.amount);
+    const integritySignature = await sha256Hex(
+      `${finalReference}${finalAmount}COP${boldSecretKey}`,
+    );
+
+    return response(origin, 201, {
+      ok: true,
+      invoice: result.invoice,
+      intent,
+      idempotent_replay:
+        result.idempotent_replay === true,
+      checkout: {
+        api_key: boldIdentityKey,
+        order_id: finalReference,
+        amount: String(finalAmount),
+        currency: "COP",
+        integrity_signature: integritySignature,
+        redirection_url: boldRedirectUrl,
+        description: `Pago factura ${invoiceNumber}`,
+      },
+    });
+  }
   if (req.method === "POST" && route === "/wallet/topup-intent") {
     if (session.actor_type !== "client" || !session.client_id) {
       throw new Error("FORBIDDEN");

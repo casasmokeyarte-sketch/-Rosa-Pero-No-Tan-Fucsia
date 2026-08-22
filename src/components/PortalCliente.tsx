@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import BolsilloCliente from './BolsilloCliente';
+import BolsilloCliente, { OfficialBoldButton } from './BolsilloCliente';
 import AyudaCliente from './AyudaCliente';
-import { fetchWallet, getWalletSession, purchaseWithWallet } from '../lib/walletApi';
+import { BoldCheckout, createDirectBoldPaymentIntent, fetchWallet, getWalletSession, purchaseWithWallet } from '../lib/walletApi';
 import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
@@ -270,6 +270,18 @@ export default function PortalCliente({
     invoiceNumber: string;
     idempotencyKey: string;
   } | null>(null);
+
+  const [directBoldCheckout, setDirectBoldCheckout] =
+    useState<BoldCheckout | null>(null);
+  const [directBoldLoading, setDirectBoldLoading] = useState(false);
+  const [directBoldError, setDirectBoldError] = useState<string | null>(null);
+  const directBoldAttemptRef = useRef<{
+    fingerprint: string;
+    invoiceId: string;
+    invoiceNumber: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const directBoldAddedInvoicesRef = useRef<Set<string>>(new Set());
   // Filter messages for this client
   const clientChatMessages = chatMessages.filter(msg => msg.clientId === client.id);
   const blockReason = useMemo(() => getClientBillingBlockReason(client, invoices), [client, invoices]);
@@ -298,9 +310,7 @@ export default function PortalCliente({
   const deliveryCost = deliveryMethod === 'oficina' ? 15000.00 : 0.00; // Surcharge only applies if delivery is by office
 
   // Dynamic card payment fee
-  const cardFee = config.cardFeeEnabled && paymentOption === 'bold'
-    ? parseFloat(((cartSubtotal + deliveryCost) * ((config.cardFeePercentage || 0) / 100)).toFixed(2))
-    : 0;
+  const cardFee = 0;
 
   // Administrator-configured unique client discount (non-cumulative)
   const clientDiscount = useMemo(() => {
@@ -329,7 +339,7 @@ export default function PortalCliente({
       setWalletCheckoutBalance(null);
       setWalletCheckoutAmount(0);
       setWalletCheckoutError(
-        'Primero inicia la sesión segura en Mi Bolsillo y luego regresa al carrito.'
+        'Primero inicia la sesión segura en Pagar con Bolsillo y luego regresa al carrito.'
       );
       return;
     }
@@ -349,6 +359,12 @@ export default function PortalCliente({
     } finally {
       setWalletCheckoutLoading(false);
     }
+  };
+
+  const returnToPendingWalletPurchase = () => {
+    setActiveTab('pedido');
+    setCheckoutStep('payment');
+    void prepareWalletCheckout();
   };
 
   // Auto scroll chat to bottom with rendering yield
@@ -465,7 +481,7 @@ export default function PortalCliente({
   const submitWalletPurchase = async () => {
     const token = getWalletSession(client.id);
     if (!token) {
-      setWalletCheckoutError('Primero inicia la sesión segura en Mi Bolsillo.');
+      setWalletCheckoutError('Primero inicia la sesión segura en Pagar con Bolsillo.');
       return;
     }
 
@@ -599,10 +615,140 @@ export default function PortalCliente({
     }
   };
 
+  const prepareDirectBoldPayment = async () => {
+    const token = getWalletSession(client.id);
+
+    if (!token) {
+      setDirectBoldError(
+        'La sesión segura del cliente venció. Cierra sesión e ingresa nuevamente antes de pagar con Bold.'
+      );
+      return;
+    }
+
+    const ineligibleProducts = cart.filter(
+      item => item.product.walletEligible !== true
+    );
+
+    if (ineligibleProducts.length > 0) {
+      setDirectBoldError(
+        'Uno o más productos no están autorizados para pago en línea.'
+      );
+      return;
+    }
+
+    const fingerprint = JSON.stringify({
+      clientId: client.id,
+      items: cart.map(item => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        note: item.note
+      })),
+      deliveryMethod,
+      deliveryAddress,
+      deliveryCost
+    });
+
+    let attempt = directBoldAttemptRef.current;
+
+    if (!attempt || attempt.fingerprint !== fingerprint) {
+      const invoiceId =
+        `inv-bold-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+
+      attempt = {
+        fingerprint,
+        invoiceId,
+        invoiceNumber:
+          `WEB-${Math.floor(100000 + Math.random() * 900000)}`,
+        idempotencyKey:
+          `web-bold-${invoiceId}-${crypto.randomUUID()}`
+      };
+
+      directBoldAttemptRef.current = attempt;
+    }
+
+    setDirectBoldLoading(true);
+    setDirectBoldError(null);
+    setDirectBoldCheckout(null);
+
+    try {
+      const result = await createDirectBoldPaymentIntent(token, {
+        invoice_id: attempt.invoiceId,
+        invoice_number: attempt.invoiceNumber,
+        items: cart.map(item => ({
+          productId: item.product.id,
+          quantity: item.quantity,
+          note: item.note
+        })),
+        delivery_fee: deliveryCost,
+        delivery_method: deliveryMethod,
+        delivery_address: deliveryAddress,
+        idempotency_key: attempt.idempotencyKey
+      });
+
+      setDirectBoldCheckout(result.checkout);
+
+      if (!directBoldAddedInvoicesRef.current.has(result.invoice.id)) {
+        const serverInvoice = result.invoice;
+
+        const newInvoice: Invoice = {
+          id: serverInvoice.id,
+          invoiceNumber: serverInvoice.invoice_number,
+          clientId: serverInvoice.client_id,
+          clientName: serverInvoice.client_name,
+          clientRut: serverInvoice.client_rut,
+          items: serverInvoice.items as InvoiceItem[],
+          subtotal: Number(serverInvoice.subtotal),
+          discount: Number(serverInvoice.discount),
+          taxRate: Number(serverInvoice.tax_rate),
+          taxAmount: Number(serverInvoice.tax_amount),
+          total: Number(serverInvoice.total),
+          paymentMethod: 'Bold',
+          paymentStatus: 'Pendiente',
+          dueDate: serverInvoice.due_date,
+          createdAt: serverInvoice.created_at,
+          cashierName: serverInvoice.cashier_name,
+          isDelivery: serverInvoice.is_delivery,
+          deliveryFee: Number(serverInvoice.delivery_fee || 0),
+          deliveryRider:
+            deliveryMethod === 'recoge' ? 'N/A' : deliveryRider,
+          deliveryTransport:
+            deliveryMethod === 'recoge' ? 'N/A' : deliveryTransport,
+          deliveryStatus: 'Pendiente',
+          deliveryMethod,
+          guideAddress:
+            deliveryMethod === 'recoge'
+              ? 'N/A (Retira en Oficina)'
+              : deliveryAddress,
+          walletPaidAmount: 0,
+          amountDue: Number(
+            serverInvoice.amount_due ?? serverInvoice.total
+          )
+        };
+
+        onAddInvoice(newInvoice);
+        directBoldAddedInvoicesRef.current.add(result.invoice.id);
+      }
+
+      showToast(
+        'Orden creada como pendiente. Continúa con el botón oficial de Bold.',
+        'info'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'No fue posible preparar el pago directo con Bold.';
+
+      setDirectBoldError(message);
+      showToast(message, 'error');
+    } finally {
+      setDirectBoldLoading(false);
+    }
+  };
   // Submit client online order checkout
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0 || walletCheckoutLoading) return;
+    if (cart.length === 0 || walletCheckoutLoading || directBoldLoading) return;
 
     if (paymentOption === 'credit') {
       const availableCredit = client.creditLimit - client.outstandingBalance;
@@ -619,11 +765,7 @@ export default function PortalCliente({
       return;
     }
 
-    showToast(
-      "Para pagos en línea seguros, agrega saldo desde Mi Bolsillo. La recarga solo se confirma mediante el webhook firmado de Bold.",
-      "info"
-    );
-    setActiveTab('bolsillo');
+    await prepareDirectBoldPayment();
   };
 
   // Send message chat simulation
@@ -1110,7 +1252,11 @@ export default function PortalCliente({
 
           {/* SECURE WALLET VIEW */}
           {activeTab === 'bolsillo' && (
-            <BolsilloCliente client={client} />
+            <BolsilloCliente
+              client={client}
+              hasPendingPurchase={cart.length > 0}
+              onContinuePurchase={returnToPendingWalletPurchase}
+            />
           )}
           
           {/* ORDER ONLINE SUB-VIEW */}
@@ -1428,7 +1574,7 @@ export default function PortalCliente({
                                   : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
                               }`}
                             >
-                              Pago Bold
+                              Recargar con Bold
                             </button>
                             <button
                               type="button"
@@ -1439,7 +1585,7 @@ export default function PortalCliente({
                                   : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-white'
                               }`}
                             >
-                              Mi Bolsillo
+                              Pagar con Bolsillo
                             </button>
                           </div>
 
@@ -1499,7 +1645,7 @@ export default function PortalCliente({
                                   onClick={() => setActiveTab('bolsillo')}
                                   className="w-full py-2 rounded-lg border border-cyan-400/30 text-cyan-200 text-[10px] font-bold"
                                 >
-                                  INICIAR SESIÓN EN MI BOLSILLO
+                                  DESBLOQUEAR BOLSILLO PARA PAGAR
                                 </button>
                               )}
                             </div>
@@ -1521,7 +1667,7 @@ export default function PortalCliente({
                                 <span className="font-bold">+$15.000 COP</span>
                               </div>
                             )}
-                            {config.cardFeeEnabled && paymentOption === 'bold' && (
+                            {cardFee > 0 && paymentOption === 'bold' && (
                               <div className="flex justify-between text-cyber-pink">
                                 <span>Comisión Tarjeta ({config.cardFeePercentage}%):</span>
                                 <span className="font-bold">+${cardFee.toLocaleString('es-CO')} COP</span>
@@ -1539,24 +1685,42 @@ export default function PortalCliente({
                           {paymentOption === 'bold' ? (
                             <div className="space-y-3">
                               <div className="bg-cyan-500/10 border border-cyan-500/25 p-3 rounded-xl text-[10px] text-cyan-100 leading-relaxed">
-                                El pago en línea del Bolsillo utiliza una intención creada por el servidor y confirmación mediante webhook. No se solicitan datos de tarjeta en esta página.
+                                Bold paga esta factura directamente. No utiliza ni descuenta el saldo del Bolsillo. La factura solo cambia a Pagado cuando llega la confirmación segura del webhook.
                               </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setCheckoutStep('shipping')}
-                                  className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
-                                >
-                                  Atrás
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveTab('bolsillo')}
-                                  className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink"
-                                >
-                                  IR A MI BOLSILLO
-                                </button>
-                              </div>
+
+                              {directBoldError && (
+                                <div className="bg-red-500/10 border border-red-500/25 text-red-200 p-2.5 rounded-lg text-[10px] leading-relaxed">
+                                  {directBoldError}
+                                </div>
+                              )}
+
+                              {directBoldCheckout ? (
+                                <div className="space-y-3">
+                                  <div className="bg-amber-500/10 border border-amber-500/25 p-3 rounded-xl text-[10px] text-amber-100 leading-relaxed">
+                                    La orden quedó Pendiente. Continúa con el botón oficial para pagar directamente con Bold.
+                                  </div>
+                                  <OfficialBoldButton checkout={directBoldCheckout} />
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCheckoutStep('shipping')}
+                                    className="py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-gray-400 hover:text-white text-xs font-mono font-bold cursor-pointer"
+                                  >
+                                    Atrás
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    disabled={directBoldLoading}
+                                    className="py-2.5 rounded-xl bg-cyber-pink text-black hover:bg-cyber-accent text-xs font-mono font-bold cursor-pointer neon-shadow-pink disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    {directBoldLoading
+                                      ? 'PREPARANDO...'
+                                      : 'PAGAR DIRECTO CON BOLD'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="grid grid-cols-2 gap-2">
@@ -1581,7 +1745,7 @@ export default function PortalCliente({
                                 {walletCheckoutLoading
                                   ? 'PROCESANDO...'
                                   : paymentOption === 'wallet'
-                                  ? 'APLICAR SALDO AL PEDIDO'
+                                  ? 'PAGAR Y CONTINUAR'
                                   : 'CONFIRMAR Y DESPACHAR ORDEN'}
                               </button>
                             </div>

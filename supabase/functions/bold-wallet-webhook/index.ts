@@ -1,3 +1,4 @@
+/// <reference lib="deno.ns" />
 import { createClient } from "npm:@supabase/supabase-js@2.110.0";
 
 const JSON_HEADERS = {
@@ -43,7 +44,11 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digestInput = Uint8Array.from(bytes);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    digestInput.buffer,
+  );
   return bytesToHex(new Uint8Array(digest));
 }
 
@@ -182,7 +187,7 @@ Deno.serve(async (req) => {
     const createdAt = typeof payment.created_at === "string" ? payment.created_at : null;
     const payloadSha256 = await sha256Hex(rawBody);
 
-    const { data: result, error } = await admin.rpc("wallet_process_bold_event", {
+    const rpcArguments = {
       p_notification_id: notificationId,
       p_event_type: eventType,
       p_payment_id: paymentId,
@@ -193,11 +198,36 @@ Deno.serve(async (req) => {
       p_payload_sha256: payloadSha256,
       p_event_created_at: createdAt,
       p_provider_summary: { payment_method: paymentMethod, integration },
-    });
+    };
+
+    const processor = orderReference.startsWith("WEB-")
+      ? "web_bold_process_event"
+      : orderReference.startsWith("WAL-")
+        ? "wallet_process_bold_event"
+        : null;
+
+    if (!processor) {
+      console.warn("bold_webhook_unknown_reference_prefix");
+      return json(200, {
+        ok: true,
+        result: { matched: false, reason: "unsupported_reference" },
+      });
+    }
+
+    const { data: result, error } = await admin.rpc(
+      processor,
+      rpcArguments,
+    );
 
     if (error) {
-      console.error("bold_wallet_webhook_processing_failed", error.code);
-      return json(500, { ok: false, error: "Temporary processing failure" });
+      console.error("bold_webhook_processing_failed", {
+        processor,
+        code: error.code,
+      });
+      return json(500, {
+        ok: false,
+        error: "Temporary processing failure",
+      });
     }
 
     return json(200, { ok: true, result });

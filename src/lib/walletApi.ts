@@ -114,7 +114,7 @@ export type WalletPurchaseInvoice = {
   tax_amount: number;
   total: number;
   wallet_paid_amount: number;
-  amount_due: number;
+  amount_due?: number;
   payment_method: string;
   payment_status: 'Pagado' | 'Pendiente' | string;
   due_date: string;
@@ -274,6 +274,80 @@ export async function updateWalletProductEligibility(
   );
 }
 
+export type DispatchReviewProduct = {
+  id: string;
+  code?: string;
+  name: string;
+  category?: string;
+  dispatch_eligibility_status:
+    | 'unreviewed'
+    | 'allowed'
+    | 'restricted';
+  dispatch_reviewed_at?: string | null;
+  dispatch_reviewed_by?: string | null;
+  dispatch_review_requested_at?: string | null;
+  dispatch_review_requested_by?: string | null;
+  automatically_restricted: boolean;
+};
+
+export async function fetchDispatchReviewProducts(token: string) {
+  return walletRequest<{
+    ok: true;
+    products: DispatchReviewProduct[];
+  }>('/products/dispatch-review', {
+    token
+  });
+}
+
+export async function updateDispatchReview(
+  token: string,
+  input: {
+    product_id: string;
+    status: 'allowed' | 'restricted';
+    review_note: string;
+  }
+) {
+  return walletRequest<{
+    ok: true;
+    product: DispatchReviewProduct & {
+      review_note?: string;
+    };
+  }>('/products/dispatch-review', {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(input)
+  });
+}
+export async function operatorPurchaseWithWallet(
+  token: string,
+  input: {
+    client_id: string;
+    client_code: string;
+    client_password: string;
+    invoice_id: string;
+    invoice_number: string;
+    items: Array<{
+      productId: string;
+      quantity: number;
+      note?: string;
+    }>;
+    delivery_fee: number;
+    delivery_method: 'oficina' | 'cliente' | 'recoge';
+    delivery_address?: string;
+    wallet_amount: number;
+    remaining_payment_method: string;
+    idempotency_key: string;
+  }
+) {
+  return walletRequest<WalletPurchaseResult>(
+    '/operator/wallet/purchase',
+    {
+      method: 'POST',
+      token,
+      body: JSON.stringify(input)
+    }
+  );
+}
 export async function purchaseWithWallet(
   token: string,
   input: {
@@ -294,6 +368,54 @@ export async function purchaseWithWallet(
   });
 }
 
+export async function createDirectBoldPaymentIntent(
+  token: string,
+  input: {
+    invoice_id: string;
+    invoice_number: string;
+    items: Array<{
+      productId: string;
+      quantity: number;
+      note?: string;
+    }>;
+    delivery_fee: number;
+    delivery_method: 'oficina' | 'cliente' | 'recoge';
+    delivery_address?: string;
+    idempotency_key: string;
+  }
+) {
+  return walletRequest<{
+    ok: true;
+    invoice: WalletPurchaseInvoice;
+    intent: {
+      id: string;
+      client_id: string;
+      invoice_id: string;
+      order_reference: string;
+      amount: number;
+      currency: string;
+      status:
+        | 'pending'
+        | 'approved'
+        | 'rejected'
+        | 'cancelled'
+        | 'expired'
+        | 'review_required';
+      expires_at: string;
+      provider_payment_id?: string | null;
+      approved_at?: string | null;
+      rejected_at?: string | null;
+      cancelled_at?: string | null;
+      last_event_at?: string | null;
+    };
+    idempotent_replay: boolean;
+    checkout: BoldCheckout;
+  }>('/web/bold-payment-intent', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(input)
+  });
+}
 export async function createWalletTopupIntent(
   token: string,
   amount: number,
