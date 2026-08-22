@@ -34,6 +34,8 @@ type BolsilloClienteProps = {
     code?: string;
     name: string;
   };
+  hasPendingPurchase?: boolean;
+  onContinuePurchase?: () => void;
 };
 
 const pendingKey = (clientId: string) => `wallet_pending_topup_${clientId}`;
@@ -59,7 +61,7 @@ const statusLabel = (status: string) => {
   return labels[status] || status;
 };
 
-function OfficialBoldButton({ checkout }: { checkout: BoldCheckout }) {
+export function OfficialBoldButton({ checkout }: { checkout: BoldCheckout }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,7 +95,11 @@ function OfficialBoldButton({ checkout }: { checkout: BoldCheckout }) {
   );
 }
 
-export default function BolsilloCliente({ client }: BolsilloClienteProps) {
+export default function BolsilloCliente({
+  client,
+  hasPendingPurchase = false,
+  onContinuePurchase
+}: BolsilloClienteProps) {
   const [token, setToken] = useState(() => getWalletSession(client.id));
   const [password, setPassword] = useState('');
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
@@ -184,6 +190,10 @@ export default function BolsilloCliente({ client }: BolsilloClienteProps) {
       saveWalletSession(client.id, response.token);
       setToken(response.token);
       setPassword('');
+
+      if (hasPendingPurchase && onContinuePurchase) {
+        onContinuePurchase();
+      }
     } catch (requestError) {
       setError((requestError as Error).message);
     } finally {
@@ -246,7 +256,7 @@ export default function BolsilloCliente({ client }: BolsilloClienteProps) {
             Desbloquear mi Bolsillo
           </h2>
           <p className="text-xs text-gray-400">
-            Confirma tu contraseña para consultar el saldo y crear recargas seguras.
+            Confirma tu contraseña para consultar el saldo, recargar o regresar a pagar tu pedido.
           </p>
         </div>
 
@@ -326,6 +336,26 @@ export default function BolsilloCliente({ client }: BolsilloClienteProps) {
         </div>
       </div>
 
+      {hasPendingPurchase && onContinuePurchase && (
+        <div className="rounded-2xl border border-cyan-400/40 bg-cyan-500/10 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-black text-white font-mono uppercase">
+              Tienes una compra pendiente
+            </p>
+            <p className="mt-1 text-[10px] text-cyan-100/80">
+              El saldo puede aplicarse desde el paso de pago del pedido.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onContinuePurchase}
+            className="w-full rounded-xl bg-cyan-300 py-3 text-xs font-black font-mono text-slate-950"
+          >
+            VOLVER AL PEDIDO Y PAGAR
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs">
           {error}
@@ -337,7 +367,7 @@ export default function BolsilloCliente({ client }: BolsilloClienteProps) {
           <div className="flex items-center gap-2">
             <WalletCards className="text-cyber-pink" size={18} />
             <h3 className="font-mono font-black text-white text-sm uppercase">
-              Agregar saldo con Bold
+              Recargar saldo con Bold
             </h3>
           </div>
 
@@ -360,7 +390,7 @@ export default function BolsilloCliente({ client }: BolsilloClienteProps) {
               disabled={submitting || wallet?.status !== 'active'}
               className="w-full py-3 rounded-xl bg-cyber-pink text-black font-black font-mono text-xs disabled:opacity-40"
             >
-              {submitting ? 'CREANDO INTENCIÓN…' : 'CONTINUAR CON BOLD'}
+              {submitting ? 'CREANDO INTENCIÓN…' : 'RECARGAR CON BOLD'}
             </button>
           </form>
 
