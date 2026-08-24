@@ -2258,10 +2258,32 @@ export default function App() {
     if (isSupabaseEnabled) syncUpsert('clients', client);
   };
 
-  const handleUpdateClient = (updatedClient: Client) => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-    showToast(`Datos de '${updatedClient.name}' actualizados con éxito`, "info");
-    if (isSupabaseEnabled) syncUpsert('clients', updatedClient);
+  const handleUpdateClient = async (updatedClient: Client) => {
+    try {
+      if (isSupabaseEnabled) {
+        await syncUpsert('clients', updatedClient);
+      }
+
+      setClients(prev =>
+        prev.map(client =>
+          client.id === updatedClient.id ? updatedClient : client
+        )
+      );
+
+      showToast(
+        `Datos de '${updatedClient.name}' guardados correctamente`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Client persistence failed:', error);
+
+      showToast(
+        'No se pudo guardar el crédito en Supabase. Verifica la conexión e intenta nuevamente.',
+        'error'
+      );
+
+      throw error;
+    }
   };
 
   const handleDeleteClient = (clientId: string) => {

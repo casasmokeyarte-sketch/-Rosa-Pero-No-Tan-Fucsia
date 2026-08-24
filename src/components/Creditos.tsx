@@ -18,7 +18,7 @@ interface CreditosProps {
   clients: Client[];
   products: Product[];
   invoices: Invoice[];
-  onUpdateClient: (client: Client) => void;
+  onUpdateClient: (client: Client) => Promise<void> | void;
   currentUser: any;
 }
 
@@ -110,7 +110,7 @@ export default function Creditos({
   };
 
   // 5. Submit Changes
-  const handleSaveConfig = (e: React.FormEvent) => {
+  const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClient) return;
 
@@ -125,8 +125,13 @@ export default function Creditos({
       discountedProductIds: hasSpecialDiscount && discountType === 'especificos' ? discountedProductIds : []
     };
 
-    onUpdateClient(updated);
-    setEditingClient(null);
+    try {
+      await onUpdateClient(updated);
+      setEditingClient(null);
+    } catch {
+      // App.tsx muestra el error.
+      // La ventana permanece abierta para reintentar.
+    }
   };
 
   // 6. Filter products in catalog for selection
