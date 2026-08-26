@@ -744,7 +744,14 @@ export default function Facturacion({
       idempotencyKey
     } = identifiers;
 
-    const isCredit = paymentMethod.toLowerCase().includes('cred');
+    const normalizedPaymentMethod = paymentMethod
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+
+    const isCredit =
+      normalizedPaymentMethod.includes('credito');
 
     const newInvoice: Invoice = {
       id: invoiceId,
