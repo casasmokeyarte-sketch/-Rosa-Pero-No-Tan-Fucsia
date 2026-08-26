@@ -18,7 +18,7 @@ import {
 interface CarteraProps {
   invoices: Invoice[];
   clients: Client[];
-  onAddPayment: (invoiceId: string, amount: number) => void;
+  onAddPayment: (invoiceId: string, amount: number) => Promise<void> | void;
 }
 
 export default function Cartera({ 
@@ -51,6 +51,20 @@ export default function Cartera({
     };
   };
 
+  const getOutstandingAmount = (invoice: Invoice) => {
+    if (
+      invoice.paymentStatus === 'Pagado' ||
+      invoice.paymentStatus === 'Anulada'
+    ) {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      Number(invoice.amountDue ?? invoice.total)
+    );
+  };
+
   const processedInvoices = creditInvoices.map(getInvoiceWithRealStatus);
 
   // Apply search and status filters
@@ -68,7 +82,7 @@ export default function Cartera({
   const totalOutstanding = clients.reduce((sum, c) => sum + c.outstandingBalance, 0);
   const overdueTotal = processedInvoices
     .filter(inv => inv.isOverdue)
-    .reduce((sum, inv) => sum + inv.total, 0);
+    .reduce((sum, inv) => sum + getOutstandingAmount(inv), 0);
 
   // Simulate Due Date Notification
   const handleTriggerNotification = (inv: Invoice) => {
@@ -87,20 +101,44 @@ export default function Cartera({
   // Open installment logger
   const openPaymentLog = (inv: Invoice) => {
     setActiveInvoice(inv);
-    setPaymentAmount(inv.total); // default to pay in full
+    setPaymentAmount(getOutstandingAmount(inv)); // default to pay in full
     setShowPaymentModal(true);
   };
 
   // Submit payment/installment
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeInvoice || paymentAmount <= 0) return;
 
-    onAddPayment(activeInvoice.id, parseFloat(paymentAmount.toString()));
-    
-    // Reset and close
-    setShowPaymentModal(false);
-    setActiveInvoice(null);
+    if (!activeInvoice || paymentAmount <= 0) {
+      return;
+    }
+
+    const outstandingAmount =
+      getOutstandingAmount(activeInvoice);
+
+    const amountToApply = Math.min(
+      Number(paymentAmount),
+      outstandingAmount
+    );
+
+    if (amountToApply <= 0) {
+      return;
+    }
+
+    try {
+      await onAddPayment(
+        activeInvoice.id,
+        amountToApply
+      );
+
+      // Close only after Supabase confirms the payment.
+      setShowPaymentModal(false);
+      setActiveInvoice(null);
+      setPaymentAmount(0);
+    } catch {
+      // App.tsx displays the persistence error.
+      // Keep this window open so the payment can be verified.
+    }
   };
 
   return (
@@ -295,7 +333,7 @@ export default function Cartera({
               </div>
               <div className="flex justify-between text-cyber-pink font-bold border-t border-slate-800 pt-1.5 mt-1.5">
                 <span>Saldo Pendiente de Cobro:</span>
-                <span>${activeInvoice.total.toFixed(2)}</span>
+                <span>${getOutstandingAmount(activeInvoice).toFixed(2)}</span>
               </div>
             </div>
 
@@ -306,14 +344,14 @@ export default function Cartera({
                   <input 
                     type="number"
                     value={paymentAmount}
-                    onChange={e => setPaymentAmount(Math.min(activeInvoice.total, Math.max(1, parseFloat(e.target.value) || 0)))}
+                    onChange={e => setPaymentAmount(Math.min(getOutstandingAmount(activeInvoice), Math.max(1, parseFloat(e.target.value) || 0)))}
                     className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white font-bold text-sm focus:outline-none glow-border-pink pl-6"
                     required
                   />
                   <span className="absolute left-2.5 top-3 text-xs text-gray-500">$</span>
                 </div>
                 <p className="text-[9px] text-gray-500 leading-normal">
-                  Puede ser un abono parcial o el pago total (${activeInvoice.total.toFixed(2)}) del saldo comercial.
+                  Puede ser un abono parcial o el pago total (${getOutstandingAmount(activeInvoice).toFixed(2)}) del saldo comercial.
                 </p>
               </div>
 
