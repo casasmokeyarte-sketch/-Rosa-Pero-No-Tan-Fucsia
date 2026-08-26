@@ -2574,56 +2574,148 @@ export default function App() {
   };
 
   // 5. Payment on Accounts (portfolio collection)
-  const handleAddPayment = (invoiceId: string, amount: number) => {
-    // Subtract outstanding debt from invoice total inside lists
-    setInvoices(prevInvoices => {
-      return prevInvoices.map(inv => {
-        if (inv.id === invoiceId) {
-          const newTotalRemaining = Math.max(0, inv.total - amount);
-          const updated = {
-            ...inv,
-            total: newTotalRemaining,
-            paymentStatus: newTotalRemaining === 0 ? 'Pagado' as const : 'Pendiente' as const
-          };
-          if (isSupabaseEnabled) syncUpsert('invoices', updated);
-          return updated;
-        }
-        return inv;
-      });
-    });
+  const handleAddPayment = async (
+    invoiceId: string,
+    amount: number
+  ) => {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('El valor del abono no es válido.', 'error');
+      return;
+    }
 
-    // Reduce client deudor balance
-    const targetInvoice = invoices.find(inv => inv.id === invoiceId)!;
-    setClients(prevClients => {
-      return prevClients.map(c => {
-        if (c.id === targetInvoice.clientId) {
-          const updated = {
-            ...c,
-            outstandingBalance: Math.max(0, c.outstandingBalance - amount)
-          };
-          if (isSupabaseEnabled) syncUpsert('clients', updated);
-          return updated;
-        }
-        return c;
-      });
-    });
+    const targetInvoice = invoices.find(
+      invoice => invoice.id === invoiceId
+    );
 
-    // Add collected cash to the current active register shift if open!
-    setShifts(prevShifts => {
-      return prevShifts.map(s => {
-        if (s.status === 'Abierta') {
-          const updated = {
-            ...s,
-            salesCash: s.salesCash + amount,
-            expectedCash: s.expectedCash + amount
-          };
-          if (isSupabaseEnabled) syncUpsert('shifts', updated);
-          return updated;
+    if (!targetInvoice) {
+      showToast('No se encontró la factura seleccionada.', 'error');
+      return;
+    }
+
+    const currentAmountDue = Math.max(
+      0,
+      Number(
+        targetInvoice.amountDue ??
+        (
+          targetInvoice.paymentStatus === 'Pagado'
+            ? 0
+            : targetInvoice.total
+        )
+      )
+    );
+
+    const appliedAmount = Math.min(
+      amount,
+      currentAmountDue
+    );
+
+    if (appliedAmount <= 0) {
+      showToast('Esta factura no tiene saldo pendiente.', 'info');
+      return;
+    }
+
+    const newAmountDue = Math.max(
+      0,
+      currentAmountDue - appliedAmount
+    );
+
+    const updatedInvoice: Invoice = {
+      ...targetInvoice,
+      // The original invoice total is immutable.
+      total: targetInvoice.total,
+      amountDue: newAmountDue,
+      paymentStatus:
+        newAmountDue === 0
+          ? 'Pagado'
+          : 'Pendiente'
+    };
+
+    const targetClient = clients.find(
+      client => client.id === targetInvoice.clientId
+    );
+
+    const updatedClient = targetClient
+      ? {
+          ...targetClient,
+          outstandingBalance: Math.max(
+            0,
+            targetClient.outstandingBalance - appliedAmount
+          )
         }
-        return s;
-      });
-    });
-    showToast(`Abono registrado: $${amount} USD ingresados a caja`, "success");
+      : null;
+
+    const activeShift = shifts.find(
+      shift => shift.status === 'Abierta'
+    );
+
+    const updatedShift = activeShift
+      ? {
+          ...activeShift,
+          salesCash:
+            activeShift.salesCash + appliedAmount,
+          expectedCash:
+            activeShift.expectedCash + appliedAmount
+        }
+      : null;
+
+    try {
+      if (isSupabaseEnabled) {
+        await syncUpsert('invoices', updatedInvoice);
+
+        if (updatedClient) {
+          await syncUpsert('clients', updatedClient);
+        }
+
+        if (updatedShift) {
+          await syncUpsert('shifts', updatedShift);
+        }
+      }
+
+      setInvoices(previous =>
+        previous.map(invoice =>
+          invoice.id === invoiceId
+            ? updatedInvoice
+            : invoice
+        )
+      );
+
+      if (updatedClient) {
+        setClients(previous =>
+          previous.map(client =>
+            client.id === updatedClient.id
+              ? updatedClient
+              : client
+          )
+        );
+      }
+
+      if (updatedShift) {
+        setShifts(previous =>
+          previous.map(shift =>
+            shift.id === updatedShift.id
+              ? updatedShift
+              : shift
+          )
+        );
+      }
+
+      showToast(
+        `Abono confirmado: $${appliedAmount.toLocaleString('es-CO')} COP`,
+        'success'
+      );
+    } catch (error) {
+      console.error(
+        'Portfolio payment persistence failed:',
+        error
+      );
+
+      showToast(
+        'No se pudo confirmar el abono en Supabase. No vuelvas a registrarlo hasta verificar el estado.',
+        'error'
+      );
+
+      throw error;
+    }
   };
 
   // 6. Expense additions

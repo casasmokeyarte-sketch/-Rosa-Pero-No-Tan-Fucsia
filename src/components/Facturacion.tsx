@@ -767,6 +767,7 @@ export default function Facturacion({
       total,
       paymentMethod,
       paymentStatus: isCredit ? 'Pendiente' : 'Pagado',
+      amountDue: isCredit ? total : 0,
       dueDate: isCredit ? dueDate : new Date().toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
       cashierName: activeShift.user,
