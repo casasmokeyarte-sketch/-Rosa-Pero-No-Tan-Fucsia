@@ -30,6 +30,7 @@ import {
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
 import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
+import { loginWalletClient, loginWalletOperator, saveWalletSession } from './lib/walletApi';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -672,51 +673,69 @@ export default function App() {
     }
   }, [currentUser]);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
-    const user = users.find(
-      u => u.username.toLowerCase().trim() === loginUsername.toLowerCase().trim()
-    );
+    try {
+      const result = await loginWalletOperator(
+        loginUsername.trim(),
+        loginPassword
+      );
 
-    if (!user) {
-      setLoginError("CÓDIGO OPERATIVO INVÁLIDO: Agente no registrado.");
-      return;
-    }
+      const user = users.find(
+        candidate => candidate.id === result.actor.id
+      );
 
-    const expectedPassword = user.password;
-    const isCorrect = user.password && loginPassword === expectedPassword;
-    if (isCorrect) {
+      if (!user) {
+        setLoginError(
+          "USUARIO NO DISPONIBLE: Actualiza la página e intenta nuevamente."
+        );
+        return;
+      }
+
+      saveWalletSession(user.id, result.token);
       setCurrentUser(user);
       setIsAuthenticated(true);
       setLoginPassword('');
       setLoginError(null);
-    } else {
-      setLoginError("ACCESO RESTRINGIDO: Contraseña de seguridad incorrecta.");
+    } catch {
+      setLoginError(
+        "ACCESO RESTRINGIDO: Usuario, contraseña o sesión administrativa inválida."
+      );
     }
   };
 
-  const handleClientLoginSubmit = (e: React.FormEvent) => {
+  const handleClientLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
 
-    const clientToLogin = clients.find(
-      c => c.code && c.code.trim().toUpperCase() === clientLoginRut.trim().toUpperCase()
-    );
-    if (!clientToLogin) {
-      setLoginError("CÓDIGO DE CLIENTE NO REGISTRADO: Verifica el código provisto por tu asesor.");
-      return;
-    }
+    try {
+      const result = await loginWalletClient(
+        clientLoginRut.trim(),
+        clientLoginPassword
+      );
 
-    const expectedPassword = clientToLogin.password || '1234';
-    if (clientLoginPassword === expectedPassword) {
+      const clientToLogin = clients.find(
+        client => client.id === result.actor.id
+      );
+
+      if (!clientToLogin) {
+        setLoginError(
+          "CUENTA NO DISPONIBLE: Actualiza la página e intenta nuevamente."
+        );
+        return;
+      }
+
+      saveWalletSession(clientToLogin.id, result.token);
       setCurrentClient(clientToLogin);
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
-    } else {
-      setLoginError("CONTRASEÑA INCORRECTA: Clave del portal de cliente inválida.");
+    } catch {
+      setLoginError(
+        "CREDENCIALES INCORRECTAS O ACCESO TEMPORALMENTE BLOQUEADO. Verifica el código y la contraseña."
+      );
     }
   };
 
@@ -1825,9 +1844,15 @@ export default function App() {
   // Business operations
   
   // 1. New Invoice logic (reduces inventory, updates cashier shifts, increases credit balances if necessary)
-  const handleAddInvoice = async (newInvoice: Invoice) => {
+  const handleAddInvoice = async (
+    newInvoice: Invoice,
+    options?: { skipPersistence?: boolean }
+  ) => {
     // Confirm the primary accounting record before changing local history.
-    if (isSupabaseEnabled) {
+    if (
+      isSupabaseEnabled &&
+      !options?.skipPersistence
+    ) {
       try {
         await syncUpsert('invoices', newInvoice);
       } catch (error) {
@@ -1888,37 +1913,92 @@ export default function App() {
     }));
     setAdjustments(prev => [...prev, ...newStockLogs]);
 
-    // C. Update client portfolio balance if transaction was on credit terms
-    if (newInvoice.paymentMethod === 'Crédito') {
+    // C. Split wallet and remaining payment amounts.
+    const walletPaidForInvoice = Math.max(
+      0,
+      Math.min(
+        Number(newInvoice.total || 0),
+        Number(newInvoice.walletPaidAmount || 0)
+      )
+    );
+
+    const remainingForInvoice = Math.max(
+      0,
+      Number(
+        newInvoice.amountDue ??
+        (
+          Number(newInvoice.total || 0) -
+          walletPaidForInvoice
+        )
+      )
+    );
+
+    const normalizedPaymentMethod =
+      newInvoice.paymentMethod
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    const remainingPaymentMethod =
+      normalizedPaymentMethod
+        .replace(/^bolsillo\s*\+\s*/, '')
+        .trim();
+
+    const remainingIsCredit =
+      remainingForInvoice > 0 &&
+      remainingPaymentMethod.includes('credit');
+
+    const remainingIsCash =
+      remainingForInvoice > 0 &&
+      remainingPaymentMethod.includes('efectivo');
+
+    const remainingIsCard =
+      remainingForInvoice > 0 &&
+      !remainingIsCredit &&
+      !remainingIsCash;
+
+    // Only the unpaid credit portion enters the client portfolio.
+    if (remainingIsCredit) {
       setClients(prevClients => {
-        return prevClients.map(c => {
-          if (c.id === newInvoice.clientId) {
+        return prevClients.map(client => {
+          if (client.id === newInvoice.clientId) {
             return {
-              ...c,
-              outstandingBalance: c.outstandingBalance + newInvoice.total
+              ...client,
+              outstandingBalance:
+                client.outstandingBalance +
+                remainingForInvoice
             };
           }
-          return c;
+
+          return client;
         });
       });
     }
 
-    // D. Add records to active cash register shift (only in operator session)
+    // D. Add only the non-wallet portion to the regular shift buckets.
+    // Wallet movement remains registered in the secure wallet ledger.
     if (currentUser) {
       setShifts(prevShifts => {
-        return prevShifts.map(s => {
-          if (s.status === 'Abierta') {
-            const isCash = newInvoice.paymentMethod === 'Efectivo';
-            const isCredit = newInvoice.paymentMethod === 'Crédito';
-            return {
-              ...s,
-              salesCash: s.salesCash + (isCash ? newInvoice.total : 0),
-              salesCard: s.salesCard + (!isCash && !isCredit ? newInvoice.total : 0),
-              salesCredit: s.salesCredit + (isCredit ? newInvoice.total : 0),
-              expectedCash: s.expectedCash + (isCash ? newInvoice.total : 0)
-            };
+        return prevShifts.map(shift => {
+          if (shift.status !== 'Abierta') {
+            return shift;
           }
-          return s;
+
+          return {
+            ...shift,
+            salesCash:
+              shift.salesCash +
+              (remainingIsCash ? remainingForInvoice : 0),
+            salesCard:
+              shift.salesCard +
+              (remainingIsCard ? remainingForInvoice : 0),
+            salesCredit:
+              shift.salesCredit +
+              (remainingIsCredit ? remainingForInvoice : 0),
+            expectedCash:
+              shift.expectedCash +
+              (remainingIsCash ? remainingForInvoice : 0)
+          };
         });
       });
     }

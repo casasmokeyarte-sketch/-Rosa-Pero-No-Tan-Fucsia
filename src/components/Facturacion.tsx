@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Client, Product, Invoice, InvoiceItem, Shift, BusinessConfig, Discount, User, getClientBillingBlockReason } from '../types';
 import CyberEmpty from './CyberEmpty';
+import {
+  fetchWallet,
+  getWalletOperatorSession,
+  getWalletSession,
+  operatorPurchaseWithWallet,
+  WalletPurchaseInvoice
+} from '../lib/walletApi';
 import { 
   ShoppingCart, 
   UserPlus, 
@@ -27,7 +34,10 @@ interface FacturacionProps {
   shifts: Shift[];
   config: BusinessConfig;
   currentUser: any;
-  onAddInvoice: (invoice: Invoice) => Promise<void> | void;
+  onAddInvoice: (
+    invoice: Invoice,
+    options?: { skipPersistence?: boolean }
+  ) => Promise<void> | void;
   discounts: Discount[];
   users: User[];
 }
@@ -98,6 +108,76 @@ export default function Facturacion({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
   const isSavingInvoiceRef = useRef(false);
+  const walletCheckoutAttemptRef = useRef<{
+    invoiceId: string;
+    invoiceNumber: string;
+    idempotencyKey: string;
+  } | null>(null);
+
+  // Operator-assisted wallet payment
+  const [useWalletPayment, setUseWalletPayment] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [walletStatus, setWalletStatus] = useState<string | null>(null);
+  const [walletAmount, setWalletAmount] = useState('');
+  const [walletClientPassword, setWalletClientPassword] = useState('');
+  const [isLoadingWallet, setIsLoadingWallet] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setUseWalletPayment(false);
+    setWalletAmount('');
+    setWalletClientPassword('');
+    setWalletBalance(null);
+    setWalletStatus(null);
+
+    if (
+      !selectedClient ||
+      selectedClient.id === 'c-ocasional' ||
+      !currentUser?.id
+    ) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const operatorToken =
+      getWalletOperatorSession(currentUser.id) ||
+      getWalletSession(currentUser.id);
+
+    if (!operatorToken) {
+      setWalletStatus('operator_session_required');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIsLoadingWallet(true);
+
+    void fetchWallet(operatorToken, selectedClient.id)
+      .then(result => {
+        if (cancelled) return;
+
+        setWalletBalance(Number(result.wallet?.balance || 0));
+        setWalletStatus(result.wallet?.status || 'unavailable');
+      })
+      .catch(error => {
+        if (cancelled) return;
+
+        console.error('Wallet balance lookup failed:', error);
+        setWalletBalance(null);
+        setWalletStatus('unavailable');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingWallet(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClient?.id, currentUser?.id]);
 
   // Delivery / Domicilios states
   const [isDelivery, setIsDelivery] = useState(false);
@@ -482,6 +562,33 @@ export default function Facturacion({
   const effectiveDiscount = specialDiscount > 0 ? specialDiscount : discount;
   const total = Math.max(0, preDiscountTotal - effectiveDiscount) + (isDelivery ? deliveryFee : 0);
 
+  const walletAmountValue = Math.max(
+    0,
+    Number(walletAmount || 0)
+  );
+
+  const availableWalletBalance = Math.max(
+    0,
+    Number(walletBalance || 0)
+  );
+
+  const maximumWalletPayment = Math.min(
+    total,
+    availableWalletBalance
+  );
+
+  const appliedWalletAmount = useWalletPayment
+    ? Math.min(walletAmountValue, maximumWalletPayment)
+    : 0;
+
+  const remainingAfterWallet = Math.max(
+    0,
+    total - appliedWalletAmount
+  );
+
+  const walletCanBeUsed =
+    walletStatus === 'active' &&
+    availableWalletBalance > 0;
   // Check credit constraints
   const creditAvailable = selectedClient 
     ? selectedClient.creditLimit - selectedClient.outstandingBalance 
@@ -516,14 +623,77 @@ export default function Facturacion({
       return;
     }
 
-    if (paymentMethod.toLowerCase().includes('cred')) {
-      if (!clientToUse.hasCredit) {
-        setErrorMsg(`❌ CRÉDITO RESTRINGIDO: El cliente "${clientToUse.name}" no tiene autorizada una línea de crédito.`);
+    let operatorToken: string | null = null;
+
+    if (useWalletPayment) {
+      operatorToken =
+        getWalletOperatorSession(currentUser?.id || '') ||
+        getWalletSession(currentUser?.id || '');
+
+      if (!operatorToken) {
+        setErrorMsg(
+          "La sesión segura del operador venció. Cierra sesión e ingresa nuevamente."
+        );
         return;
       }
-      const availableLimit = clientToUse.creditLimit - clientToUse.outstandingBalance;
-      if (total > availableLimit) {
-        setErrorMsg(`❌ CUPO EXCEDIDO: El cliente "${clientToUse.name}" solo dispone de $${availableLimit.toFixed(2)} de crédito.`);
+
+      if (!clientToUse.code?.trim()) {
+        setErrorMsg(
+          "El cliente seleccionado no tiene un código válido para autorizar el Bolsillo."
+        );
+        return;
+      }
+
+      if (!walletCanBeUsed) {
+        setErrorMsg(
+          "El Bolsillo del cliente no está activo o no tiene saldo disponible."
+        );
+        return;
+      }
+
+      if (
+        appliedWalletAmount <= 0 ||
+        appliedWalletAmount > maximumWalletPayment ||
+        !Number.isInteger(appliedWalletAmount)
+      ) {
+        setErrorMsg(
+          "Ingresa un valor válido en pesos para abonar desde el Bolsillo."
+        );
+        return;
+      }
+
+      if (!walletClientPassword) {
+        setErrorMsg(
+          "El cliente debe ingresar su contraseña para autorizar este abono."
+        );
+        return;
+      }
+    }
+
+    const amountPaidOutsideWallet = useWalletPayment
+      ? remainingAfterWallet
+      : total;
+
+    const remainingUsesCredit =
+      amountPaidOutsideWallet > 0 &&
+      paymentMethod.toLowerCase().includes('cred');
+
+    if (remainingUsesCredit) {
+      if (!clientToUse.hasCredit) {
+        setErrorMsg(
+          `CRÉDITO RESTRINGIDO: El cliente "${clientToUse.name}" no tiene una línea de crédito autorizada.`
+        );
+        return;
+      }
+
+      const availableLimit =
+        clientToUse.creditLimit -
+        clientToUse.outstandingBalance;
+
+      if (amountPaidOutsideWallet > availableLimit) {
+        setErrorMsg(
+          `CUPO EXCEDIDO: El cliente solamente dispone de $${availableLimit.toFixed(2)} de crédito.`
+        );
         return;
       }
     }
@@ -534,16 +704,57 @@ export default function Facturacion({
       return;
     }
 
-    // Generate a collision-resistant ID and reference across operators/devices.
-    const timestamp = Date.now();
-    const randomToken = globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 8)
-      ?? Math.random().toString(36).slice(2, 10);
-    const invoiceNumber = `${config.invoicePrefix}-${timestamp.toString(36).toUpperCase()}-${randomToken.slice(0, 4).toUpperCase()}`;
+    // Reuse the same identifiers when retrying a wallet operation.
+    const createIdentifiers = () => {
+      const timestamp = Date.now();
+      const randomToken =
+        globalThis.crypto?.randomUUID?.()
+          .replace(/-/g, '')
+          .slice(0, 12) ??
+        Math.random().toString(36).slice(2, 14);
 
-    const isCredit = paymentMethod.toLowerCase().includes('cred');
+      return {
+        invoiceId: `inv-${timestamp}-${randomToken}`,
+        invoiceNumber:
+          `${config.invoicePrefix}-` +
+          `${timestamp.toString(36).toUpperCase()}-` +
+          `${randomToken.slice(0, 4).toUpperCase()}`,
+        idempotencyKey:
+          `operator-wallet-${timestamp}-${randomToken}`
+      };
+    };
+
+    const identifiers = useWalletPayment
+      ? (
+          walletCheckoutAttemptRef.current ??
+          createIdentifiers()
+        )
+      : createIdentifiers();
+
+    if (
+      useWalletPayment &&
+      !walletCheckoutAttemptRef.current
+    ) {
+      walletCheckoutAttemptRef.current = identifiers;
+    }
+
+    const {
+      invoiceId,
+      invoiceNumber,
+      idempotencyKey
+    } = identifiers;
+
+    const normalizedPaymentMethod = paymentMethod
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+
+    const isCredit =
+      normalizedPaymentMethod.includes('credito');
 
     const newInvoice: Invoice = {
-      id: `inv-${timestamp}-${randomToken}`,
+      id: invoiceId,
       invoiceNumber,
       clientId: clientToUse.id,
       clientName: clientToUse.name,
@@ -579,10 +790,99 @@ export default function Facturacion({
     isSavingInvoiceRef.current = true;
     setIsSavingInvoice(true);
     try {
-      await onAddInvoice(newInvoice);
-      setGeneratedInvoice(newInvoice);
+      let confirmedInvoice = newInvoice;
 
-      // Clear invoice states only after Supabase confirms the transaction.
+      if (useWalletPayment) {
+        if (!operatorToken) {
+          throw new Error('OPERATOR_SESSION_REQUIRED');
+        }
+
+        const result = await operatorPurchaseWithWallet(
+          operatorToken,
+          {
+            client_id: clientToUse.id,
+            client_code: clientToUse.code!.trim(),
+            client_password: walletClientPassword,
+            invoice_id: invoiceId,
+            invoice_number: invoiceNumber,
+            items: cartItems.map(item => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              note: item.note
+            })),
+            delivery_fee: isDelivery ? deliveryFee : 0,
+            delivery_method: isDelivery
+              ? deliveryMethod
+              : 'recoge',
+            delivery_address: isDelivery
+              ? guideAddress.trim()
+              : undefined,
+            wallet_amount: appliedWalletAmount,
+            remaining_payment_method:
+              remainingAfterWallet > 0
+                ? paymentMethod
+                : '',
+            idempotency_key: idempotencyKey
+          }
+        );
+
+        const serverInvoice: WalletPurchaseInvoice =
+          result.invoice;
+
+        confirmedInvoice = {
+          ...newInvoice,
+          id: serverInvoice.id,
+          invoiceNumber: serverInvoice.invoice_number,
+          clientId: serverInvoice.client_id,
+          clientName: serverInvoice.client_name,
+          clientRut: serverInvoice.client_rut,
+          items: serverInvoice.items.map(item => ({
+            ...item,
+            unitType:
+              item.unitType as InvoiceItem['unitType']
+          })),
+          subtotal: Number(serverInvoice.subtotal),
+          discount: Number(serverInvoice.discount),
+          taxRate: Number(serverInvoice.tax_rate),
+          taxAmount: Number(serverInvoice.tax_amount),
+          total: Number(serverInvoice.total),
+          paymentMethod: serverInvoice.payment_method,
+          paymentStatus:
+            serverInvoice.payment_status as
+              Invoice['paymentStatus'],
+          dueDate: serverInvoice.due_date,
+          createdAt: serverInvoice.created_at,
+          cashierName: serverInvoice.cashier_name,
+          isDelivery: serverInvoice.is_delivery,
+          deliveryFee: Number(serverInvoice.delivery_fee),
+          deliveryStatus: serverInvoice.is_delivery
+            ? (
+                serverInvoice.delivery_status as
+                  Invoice['deliveryStatus']
+              )
+            : undefined,
+          deliveryMethod: serverInvoice.delivery_method,
+          walletPaidAmount: Number(
+            serverInvoice.wallet_paid_amount
+          ),
+          amountDue: Number(
+            serverInvoice.amount_due ??
+            (
+              Number(serverInvoice.total) -
+              Number(serverInvoice.wallet_paid_amount)
+            )
+          )
+        };
+      }
+
+      // Supabase already created a wallet invoice. The upsert is
+      // idempotent and this callback applies inventory and shift updates.
+      await onAddInvoice(
+        confirmedInvoice,
+        { skipPersistence: useWalletPayment }
+      );
+      setGeneratedInvoice(confirmedInvoice);
+
       setCartItems([]);
       setSelectedClient(null);
       setClientSearch('');
@@ -594,10 +894,55 @@ export default function Facturacion({
       setDeliveryRider('');
       setDeliveryTransport('Motocicleta');
       setSignatureDataUrl('');
+      setUseWalletPayment(false);
+      setWalletAmount('');
+      setWalletBalance(null);
+      setWalletStatus(null);
+      walletCheckoutAttemptRef.current = null;
     } catch (error) {
       console.error('Invoice checkout failed:', error);
-      setErrorMsg('❌ NO CONFIRMADA: Supabase no confirmó la factura. El formulario sigue intacto para reintentar.');
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'No fue posible confirmar la factura.';
+
+      if (
+        message.includes('ONLINE_PRODUCT_NOT_ELIGIBLE') ||
+        message.toLowerCase().includes(
+          'not eligible for wallet'
+        )
+      ) {
+        setErrorMsg(
+          "Uno o más productos no están autorizados para pago desde el Bolsillo."
+        );
+      } else if (
+        message.includes(
+          'El cliente no autorizó el uso de su Bolsillo'
+        ) ||
+        message.includes(
+          'Valid client authorization required'
+        )
+      ) {
+        setErrorMsg(
+          "El cliente no autorizó el abono. Verifica su contraseña."
+        );
+      } else if (
+        message.toLowerCase().includes(
+          'insufficient wallet balance'
+        )
+      ) {
+        setErrorMsg(
+          "El Bolsillo no tiene saldo suficiente para aplicar ese valor."
+        );
+      } else {
+        setErrorMsg(
+          `NO CONFIRMADA: ${message} El formulario sigue intacto para reintentar.`
+        );
+      }
     } finally {
+      // Never retain the client's password after an attempt.
+      setWalletClientPassword('');
       isSavingInvoiceRef.current = false;
       setIsSavingInvoice(false);
     }
@@ -1272,6 +1617,155 @@ export default function Facturacion({
                 {method}
               </button>
             ))}
+          </div>
+
+          <div className="border-t border-slate-800/80 pt-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-mono font-bold text-white">
+                  ABONAR DESDE BOLSILLO
+                </p>
+                <p className="text-[9px] text-gray-500">
+                  Opción voluntaria. El cliente debe autorizarla con su contraseña.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={!walletCanBeUsed || isLoadingWallet}
+                onClick={() => {
+                  const nextValue = !useWalletPayment;
+                  setUseWalletPayment(nextValue);
+                  setWalletClientPassword('');
+                  setErrorMsg(null);
+
+                  if (nextValue) {
+                    setWalletAmount(
+                      String(Math.floor(maximumWalletPayment))
+                    );
+                  } else {
+                    setWalletAmount('');
+                  }
+                }}
+                className={`px-3 py-2 rounded-lg border text-[10px] font-mono font-bold transition-all ${
+                  useWalletPayment
+                    ? 'bg-cyber-green/20 border-cyber-green text-cyber-green'
+                    : walletCanBeUsed
+                      ? 'bg-slate-900 border-cyber-border text-gray-300 hover:text-white'
+                      : 'bg-slate-950 border-slate-800 text-gray-600 cursor-not-allowed'
+                }`}
+              >
+                {useWalletPayment ? 'BOLSILLO ACTIVADO' : 'USAR BOLSILLO'}
+              </button>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-3 text-[10px] font-mono space-y-1.5">
+              <div className="flex justify-between text-gray-400">
+                <span>Saldo disponible:</span>
+                <span className="text-cyber-green font-bold">
+                  {isLoadingWallet
+                    ? 'Consultando...'
+                    : walletBalance === null
+                      ? 'No disponible'
+                      : `$${availableWalletBalance.toLocaleString('es-CO')} COP`}
+                </span>
+              </div>
+
+              {walletStatus === 'operator_session_required' && (
+                <p className="text-amber-400">
+                  La sesión segura del operador venció. Cierra sesión e ingresa nuevamente.
+                </p>
+              )}
+
+              {walletStatus === 'unavailable' && (
+                <p className="text-amber-400">
+                  No fue posible consultar el Bolsillo de este cliente.
+                </p>
+              )}
+
+              {walletStatus && walletStatus !== 'active' &&
+                walletStatus !== 'unavailable' &&
+                walletStatus !== 'operator_session_required' && (
+                  <p className="text-amber-400">
+                    El Bolsillo no está activo para realizar pagos.
+                  </p>
+                )}
+            </div>
+
+            {useWalletPayment && (
+              <div className="space-y-3 bg-cyber-green/5 border border-cyber-green/30 rounded-lg p-3">
+                <div className="space-y-1">
+                  <label className="block text-[9px] text-gray-400 uppercase">
+                    Valor que se abonará desde el Bolsillo
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    max={maximumWalletPayment}
+                    value={walletAmount}
+                    onChange={event => {
+                      const requested = Math.max(
+                        0,
+                        Number(event.target.value || 0)
+                      );
+
+                      setWalletAmount(
+                        String(Math.min(requested, maximumWalletPayment))
+                      );
+                      setErrorMsg(null);
+                    }}
+                    className="bg-cyber-bg border border-cyber-green/50 text-white text-xs p-2.5 rounded-lg w-full focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                  <div className="bg-slate-950/60 rounded p-2">
+                    <span className="block text-gray-500">Desde Bolsillo</span>
+                    <span className="text-cyber-green font-bold">
+                      ${appliedWalletAmount.toLocaleString('es-CO')} COP
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/60 rounded p-2">
+                    <span className="block text-gray-500">Saldo por pagar</span>
+                    <span className="text-cyber-orange font-bold">
+                      ${remainingAfterWallet.toLocaleString('es-CO')} COP
+                    </span>
+                  </div>
+                </div>
+
+                {remainingAfterWallet > 0 && (
+                  <p className="text-[9px] text-gray-400">
+                    El saldo restante se registrará con la modalidad seleccionada arriba:
+                    {' '}
+                    <strong className="text-white">{paymentMethod}</strong>.
+                  </p>
+                )}
+
+
+                <div className="space-y-1">
+                  <label className="block text-[9px] text-gray-400 uppercase">
+                    Contraseña del cliente para autorizar este abono
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={walletClientPassword}
+                    onChange={event => {
+                      setWalletClientPassword(event.target.value);
+                      setErrorMsg(null);
+                    }}
+                    placeholder="El cliente ingresa su contraseña"
+                    className="bg-cyber-bg border border-cyber-green/50 text-white text-xs p-2.5 rounded-lg w-full focus:outline-none font-mono"
+                  />
+                </div>
+
+                <p className="text-[9px] text-gray-500">
+                  La contraseña solamente se envía para autorizar esta factura y se elimina al terminar el intento.
+                </p>
+              </div>
+            )}
           </div>
 
           {paymentMethod.toLowerCase().includes('cred') && (

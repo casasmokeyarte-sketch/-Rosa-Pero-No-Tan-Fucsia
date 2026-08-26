@@ -1,5 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Product, StockAdjustment, BusinessConfig, StockTransfer, User } from '../types';
+import {
+  fetchWalletEligibleProducts,
+  getWalletSession,
+  updateDispatchReview,
+  updateWalletProductEligibility,
+  WalletEligibleProduct
+} from '../lib/walletApi';
 import CyberEmpty from './CyberEmpty';
 import { 
   Package, 
@@ -97,6 +104,44 @@ export default function Inventario({
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
+  const [reviewingDispatchProductId, setReviewingDispatchProductId] =
+    useState<string | null>(null);
+  const [reviewingWalletProductId, setReviewingWalletProductId] =
+    useState<string | null>(null);
+  const [walletReviewProducts, setWalletReviewProducts] =
+    useState<WalletEligibleProduct[]>([]);
+
+  useEffect(() => {
+    if (currentUser.role !== 'Administrador') {
+      setWalletReviewProducts([]);
+      return;
+    }
+
+    const token = getWalletSession(currentUser.id);
+    if (!token) return;
+
+    let cancelled = false;
+
+    fetchWalletEligibleProducts(token)
+      .then(result => {
+        if (!cancelled) {
+          setWalletReviewProducts(result.products);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWalletReviewProducts([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.id, currentUser.role, products.length]);
+
+  const getWalletReview = (productId: string) =>
+    walletReviewProducts.find(product => product.id === productId);
+
 
   // New product fields
   const [newCode, setNewCode] = useState('');
@@ -244,6 +289,135 @@ export default function Inventario({
     };
 
     onUpdateProduct(updatedProduct);
+  };
+
+  const handleWalletDecision = async (
+    product: Product,
+    eligible: boolean
+  ) => {
+    if (currentUser.role !== 'Administrador') {
+      window.alert('Esta acción requiere una cuenta administradora.');
+      return;
+    }
+
+    const token = getWalletSession(currentUser.id);
+
+    if (!token) {
+      window.alert(
+        'La sesión administrativa segura no está disponible. Cierra sesión e ingresa nuevamente.'
+      );
+      return;
+    }
+
+    const action = eligible ? 'autorizar' : 'restringir';
+
+    const reviewNote = window.prompt(
+      `Escribe el motivo para ${action} el pago en línea de "${product.name}". Mínimo 10 caracteres.`
+    );
+
+    if (reviewNote === null) return;
+
+    if (reviewNote.trim().length < 10) {
+      window.alert(
+        'El motivo de revisión debe contener al menos 10 caracteres.'
+      );
+      return;
+    }
+
+    setReviewingWalletProductId(product.id);
+
+    try {
+      const result = await updateWalletProductEligibility(token, {
+        product_id: product.id,
+        eligible,
+        review_note: reviewNote.trim()
+      });
+
+      setWalletReviewProducts(current => {
+        const exists = current.some(item => item.id === product.id);
+
+        return exists
+          ? current.map(item =>
+              item.id === product.id ? result.product : item
+            )
+          : [...current, result.product];
+      });
+
+      window.alert(
+        eligible
+          ? 'Producto autorizado para pagos en línea.'
+          : 'Producto restringido para pagos en línea.'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'No fue posible completar la revisión de pago.';
+
+      window.alert(message);
+    } finally {
+      setReviewingWalletProductId(null);
+    }
+  };
+
+  const handleDispatchDecision = async (
+    product: Product,
+    status: 'allowed' | 'restricted'
+  ) => {
+    if (currentUser.role !== 'Administrador') {
+      window.alert('Esta acción requiere una cuenta administradora.');
+      return;
+    }
+
+    const token = getWalletSession(currentUser.id);
+
+    if (!token) {
+      window.alert(
+        'La sesión administrativa segura no está disponible. Cierra sesión e ingresa nuevamente.'
+      );
+      return;
+    }
+
+    const action =
+      status === 'allowed' ? 'autorizar' : 'restringir';
+
+    const reviewNote = window.prompt(
+      `Escribe el motivo para ${action} el despacho de "${product.name}". Mínimo 10 caracteres.`
+    );
+
+    if (reviewNote === null) return;
+
+    if (reviewNote.trim().length < 10) {
+      window.alert(
+        'El motivo de revisión debe contener al menos 10 caracteres.'
+      );
+      return;
+    }
+
+    setReviewingDispatchProductId(product.id);
+
+    try {
+      await updateDispatchReview(token, {
+        product_id: product.id,
+        status,
+        review_note: reviewNote.trim()
+      });
+
+      window.alert(
+        status === 'allowed'
+          ? 'Producto autorizado para despacho.'
+          : 'Producto restringido para despacho.'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'No fue posible completar la revisión.';
+
+      window.alert(message);
+    } finally {
+      setReviewingDispatchProductId(null);
+    }
   };
 
   // Confirm delete product
@@ -713,6 +887,69 @@ export default function Inventario({
                             <History size={8} /> Ver Historial
                           </button>
                         </div>
+                        {/* AUTORIZACIÓN DE PAGO EN LÍNEA */}
+                        <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/10 p-2 text-[9px] font-mono">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="uppercase text-gray-500">
+                              Pago en línea
+                            </span>
+
+                            <span className={`rounded border px-1.5 py-0.5 font-bold uppercase ${
+                              getWalletReview(p.id)?.wallet_eligibility_status === 'eligible'
+                                ? 'border-green-500/30 bg-green-500/10 text-green-400'
+                                : getWalletReview(p.id)?.wallet_eligibility_status === 'restricted'
+                                  ? 'border-red-500/30 bg-red-500/10 text-red-400'
+                                  : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                            }`}>
+                              {getWalletReview(p.id)?.wallet_eligibility_status === 'eligible'
+                                ? 'Disponible'
+                                : getWalletReview(p.id)?.wallet_eligibility_status === 'restricted'
+                                  ? 'Restringido'
+                                  : 'Pendiente'}
+                            </span>
+                          </div>
+
+                          {getWalletReview(p.id)?.automatically_restricted && (
+                            <p className="mb-1.5 text-[8px] leading-tight text-red-300">
+                              Producto sujeto a control especial: no puede habilitarse automáticamente.
+                            </p>
+                          )}
+
+                          {currentUser.role === 'Administrador' && (
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleWalletDecision(p, true)
+                                }
+                                disabled={
+                                  reviewingWalletProductId === p.id ||
+                                  Boolean(
+                                    getWalletReview(p.id)
+                                      ?.automatically_restricted
+                                  )
+                                }
+                                className="rounded border border-green-500/30 bg-green-500/10 px-2 py-1 text-[8px] font-bold uppercase text-green-300 hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+                              >
+                                Autorizar pago
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleWalletDecision(p, false)
+                                }
+                                disabled={
+                                  reviewingWalletProductId === p.id
+                                }
+                                className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[8px] font-bold uppercase text-red-300 hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-50"
+                              >
+                                Restringir pago
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
                         {/* SOLICITUD DE REVISIÓN DE DESPACHO */}
                         <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-2 text-[9px] font-mono">
                           <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -761,6 +998,37 @@ export default function Inventario({
                             </button>
                           )}
                         </div>
+                        {currentUser.role === 'Administrador' &&
+                          p.dispatchReviewRequestedAt && (
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDispatchDecision(p, 'allowed')
+                                }
+                                disabled={
+                                  reviewingDispatchProductId === p.id
+                                }
+                                className="rounded border border-green-500/30 bg-green-500/10 px-2 py-1 text-[8px] font-bold uppercase text-green-300 hover:bg-green-500/20 disabled:cursor-wait disabled:opacity-50"
+                              >
+                                Autorizar despacho
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDispatchDecision(p, 'restricted')
+                                }
+                                disabled={
+                                  reviewingDispatchProductId === p.id
+                                }
+                                className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[8px] font-bold uppercase text-red-300 hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-50"
+                              >
+                                Restringir despacho
+                              </button>
+                            </div>
+                          )}
+
                         {currentUser.role === 'Administrador' && (
                           <div className="flex gap-1.5 pt-1">
                             <button 
