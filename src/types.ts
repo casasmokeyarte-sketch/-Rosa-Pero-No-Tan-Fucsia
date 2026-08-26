@@ -253,6 +253,12 @@ export interface User {
 
 export interface BusinessConfig {
   companyName: string;
+  commercialName?: string;
+  slogan?: string;
+  city?: string;
+  website?: string;
+  logoUrl?: string;
+  setupComplete?: boolean;
   rut: string;
   address: string;
   phone: string;

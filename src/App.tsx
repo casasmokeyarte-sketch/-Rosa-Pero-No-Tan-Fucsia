@@ -158,6 +158,8 @@ export default function App() {
     const saved = localStorage.getItem('extreme_config');
     return saved ? JSON.parse(saved) : INITIAL_BUSINESS_CONFIG;
   });
+  const businessLogo = config.logoUrl || '/images/logo_cyberpunk_1783131526095.jpg';
+  const businessDisplayName = config.commercialName || config.companyName;
 
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('extreme_users');
@@ -3022,7 +3024,7 @@ export default function App() {
         {/* Visual background logo */}
         <div 
           className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none opacity-[0.12] mix-blend-lighten"
-          style={{ backgroundImage: `url('/images/logo_cyberpunk_1783131526095.jpg')` }}
+          style={{ backgroundImage: `url(${businessLogo})` }}
         ></div>
 
         <div className="bg-cyber-card/95 border border-cyber-border rounded-2xl max-w-md w-full p-6 sm:p-8 space-y-6 relative z-10 shadow-2xl neon-shadow-pink">
@@ -3030,18 +3032,18 @@ export default function App() {
             {/* Logo */}
             <div className="w-16 h-16 rounded-xl overflow-hidden border-2 border-cyber-pink mx-auto animate-pulse relative">
               <img 
-                src="/images/logo_cyberpunk_1783131526095.jpg" 
-                alt="Rosa Fuerte S.A." 
+                src={businessLogo}
+                alt={`Logo de ${businessDisplayName}`}
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </div>
             <div>
               <h1 className="text-lg font-black text-white tracking-widest font-mono">
-                {config.companyName.toUpperCase()}
+                {businessDisplayName.toUpperCase()}
               </h1>
               <p className="text-[9px] text-cyber-pink font-mono tracking-widest uppercase mt-0.5">
-                Terminal de Control y Despacho
+                {config.slogan || 'Terminal de Control y Despacho'}
               </p>
             </div>
           </div>
@@ -3411,7 +3413,7 @@ export default function App() {
       {/* Visual cyber background image (from uploaded artwork) with very low opacity to maintain readable content contrast */}
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none opacity-[0.12] mix-blend-lighten"
-        style={{ backgroundImage: `url('/images/logo_cyberpunk_1783131526095.jpg')` }}
+        style={{ backgroundImage: `url(${businessLogo})` }}
       ></div>
 
       {/* Visual cyber glow grids */}
@@ -3431,18 +3433,18 @@ export default function App() {
             {/* Custom generated artwork logo */}
             <div className="w-9 h-9 rounded-lg overflow-hidden border border-cyber-pink/40 animate-pulse relative shrink-0">
               <img 
-                src="/images/logo_cyberpunk_1783131526095.jpg" 
-                alt="Rosa Fuerte Logo" 
+                src={businessLogo}
+                alt={`Logo de ${businessDisplayName}`}
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </div>
             <div className="min-w-0">
               <h1 className="text-[10px] xs:text-xs sm:text-sm font-extrabold text-white tracking-wider font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-[125px] xs:max-w-[170px] sm:max-w-none">
-                {config.companyName.toUpperCase()}
+                {businessDisplayName.toUpperCase()}
               </h1>
               <p className="text-[8px] sm:text-[10px] text-cyber-pink font-mono tracking-widest mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[125px] xs:max-w-[170px] sm:max-w-none hidden sm:block">
-                Tu Seguridad y disfrute Es Nuestra Prioridad
+                {config.slogan || 'Sistema de gestión comercial'}
               </p>
             </div>
           </div>

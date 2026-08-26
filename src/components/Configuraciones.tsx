@@ -89,6 +89,13 @@ export default function Configuraciones({
   
   // Local state for configuration form
   const [companyName, setCompanyName] = useState(config.companyName);
+  const [commercialName, setCommercialName] = useState(config.commercialName || config.companyName);
+  const [slogan, setSlogan] = useState(config.slogan || '');
+  const [city, setCity] = useState(config.city || '');
+  const [website, setWebsite] = useState(config.website || '');
+  const [logoUrl, setLogoUrl] = useState(config.logoUrl || '');
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
   const [rut, setRut] = useState(config.rut);
   const [address, setAddress] = useState(config.address);
   const [phone, setPhone] = useState(config.phone);
@@ -353,11 +360,42 @@ export default function Configuraciones({
   };
 
   // Submit config update
+  const handleLogoFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setLogoError('Seleccione un archivo de imagen válido.');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > 1024 * 1024) {
+      setLogoError('El logo debe pesar máximo 1 MB.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setLogoUrl(String(reader.result || ''));
+      setLogoError(null);
+    };
+    reader.onerror = () => setLogoError('No fue posible leer el logo seleccionado.');
+    reader.readAsDataURL(file);
+  };
+
   const handleConfigSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateConfig({
       ...config,
       companyName,
+      commercialName,
+      slogan,
+      city,
+      website,
+      logoUrl,
+      setupComplete: true,
       rut,
       address,
       phone,
@@ -673,14 +711,91 @@ export default function Configuraciones({
             </h2>
 
             <form onSubmit={handleConfigSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+              <div className="space-y-2 sm:col-span-2 rounded-lg border border-cyber-border bg-slate-950/60 p-3">
+                <label className="text-gray-400 uppercase text-[9px]">Logo de la empresa</label>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-cyber-pink/50 bg-slate-900">
+                    {logoUrl ? (
+                      <img src={logoUrl} alt="Vista previa del logo" className="h-full w-full object-contain" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[9px] text-gray-500">SIN LOGO</div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="text"
+                      value={logoUrl.startsWith('data:') ? '' : logoUrl}
+                      onChange={e => {
+                        setLogoUrl(e.target.value);
+                        setLogoError(null);
+                      }}
+                      placeholder="https://empresa.com/logo.png"
+                      className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        ref={logoFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleLogoFile}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => logoFileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 rounded-lg border border-cyber-border bg-slate-900 px-3 py-2 text-[10px] font-bold text-white hover:border-cyber-pink"
+                      >
+                        <Upload size={13} /> Subir logo
+                      </button>
+                      {logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLogoUrl('');
+                            setLogoError(null);
+                          }}
+                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] font-bold text-red-300"
+                        >
+                          Quitar logo
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-gray-500">PNG, JPG o WEBP. Tamaño máximo: 1 MB.</p>
+                    {logoError && <p className="text-[10px] text-red-400">{logoError}</p>}
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1 sm:col-span-2">
-                <label className="text-gray-400 uppercase text-[9px]">Nombre Corporativo / Razón Social</label>
+                <label className="text-gray-400 uppercase text-[9px]">Nombre comercial</label>
+                <input
+                  type="text"
+                  value={commercialName}
+                  onChange={e => setCommercialName(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-gray-400 uppercase text-[9px]">Razón social</label>
                 <input 
                   type="text" 
                   value={companyName}
                   onChange={e => setCompanyName(e.target.value)}
                   className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
                   required
+                />
+              </div>
+
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-gray-400 uppercase text-[9px]">Eslogan</label>
+                <input
+                  type="text"
+                  value={slogan}
+                  onChange={e => setSlogan(e.target.value)}
+                  placeholder="Frase que aparecerá en el encabezado"
+                  className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
                 />
               </div>
 
@@ -714,6 +829,27 @@ export default function Configuraciones({
                   onChange={e => setAddress(e.target.value)}
                   className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
                   required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 uppercase text-[9px]">Ciudad / Municipio</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 uppercase text-[9px]">Sitio web</label>
+                <input
+                  type="url"
+                  value={website}
+                  onChange={e => setWebsite(e.target.value)}
+                  placeholder="https://empresa.com"
+                  className="w-full bg-cyber-bg border border-cyber-border p-2.5 rounded-lg text-white focus:outline-none glow-border-pink"
                 />
               </div>
 

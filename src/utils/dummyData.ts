@@ -2,6 +2,12 @@ import { Client, Product, Invoice, Expense, Shift, User, BusinessConfig, StockAd
 
 export const INITIAL_BUSINESS_CONFIG: BusinessConfig = {
   companyName: "Rosa Fuerte Pero NO Tan Fucsia",
+  commercialName: "Rosa Fuerte",
+  slogan: "Tu seguridad y disfrute es nuestra prioridad",
+  city: "Bogotá D.C.",
+  website: "",
+  logoUrl: "/images/logo_cyberpunk_1783131526095.jpg",
+  setupComplete: true,
   rut: "901.884.202-6",
   address: "Búnker Comercial #77, Zona de Mitigación 3",
   phone: "+57 (601) 999-4321",
@@ -644,4 +650,3 @@ export const INITIAL_PHONE_RECORDS = [
     associatedClientId: "c-2"
   }
 ];
-

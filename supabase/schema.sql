@@ -10,6 +10,12 @@ create extension if not exists "pgcrypto";
 create table if not exists business_config (
   id              text primary key default 'singleton',
   company_name    text not null,
+  commercial_name text,
+  slogan          text,
+  city            text,
+  website         text,
+  logo_url        text,
+  setup_complete  boolean default false,
   rut             text not null,
   address         text,
   phone           text,

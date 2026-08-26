@@ -1970,11 +1970,19 @@ export default function Facturacion({
               <>
                 {/* Header */}
                 <div className="text-center space-y-1 pb-4 border-b border-dashed border-black">
-                  <h3 className="text-sm font-extrabold uppercase tracking-tight">{config.companyName}</h3>
+                  {config.logoUrl && (
+                    <img src={config.logoUrl} alt="Logo" className="mx-auto mb-2 h-12 w-12 object-contain" />
+                  )}
+                  <h3 className="text-sm font-extrabold uppercase tracking-tight">{config.commercialName || config.companyName}</h3>
+                  {config.commercialName && config.commercialName !== config.companyName && (
+                    <p className="text-[9px] uppercase">{config.companyName}</p>
+                  )}
                   <p className="text-[10px]">RUT/NIT: {config.rut}</p>
                   <p className="text-[10px]">{config.address}</p>
+                  {config.city && <p className="text-[10px]">{config.city}</p>}
                   <p className="text-[10px]">TEL: {config.phone}</p>
                   <p className="text-[10px]">{config.email}</p>
+                  {config.website && <p className="text-[10px]">{config.website}</p>}
                 </div>
 
                 {/* Meta details */}
@@ -2235,16 +2243,22 @@ export default function Facturacion({
                     </header>
 
                     <section className="grid grid-cols-[90px_1fr] gap-3 border-b border-black py-3">
-                      <div className="flex h-16 items-center justify-center border border-slate-300 text-center text-[9px] font-black">
-                        LOGO
+                      <div className="flex h-16 items-center justify-center overflow-hidden border border-slate-300 text-center text-[9px] font-black">
+                        {config.logoUrl ? (
+                          <img src={config.logoUrl} alt="Logo" className="h-full w-full object-contain p-1" />
+                        ) : 'LOGO'}
                       </div>
 
                       <div className="text-[10px] leading-tight">
                         <h3 className="text-sm font-black uppercase">
-                          {config.companyName}
+                          {config.commercialName || config.companyName}
                         </h3>
+                        {config.commercialName && config.commercialName !== config.companyName && (
+                          <div>{config.companyName}</div>
+                        )}
                         <div>NIT: {config.rut}</div>
                         <div>{config.address}</div>
+                        {config.city && <div>{config.city}</div>}
                         <div>Teléfono: {config.phone}</div>
                         <div>{config.email}</div>
                       </div>
