@@ -178,7 +178,7 @@ export default function App() {
         // Fallback
       }
     }
-    return INITIAL_USERS[1]; // "Agente Neon-Pink" as default session user
+    return INITIAL_USERS[0]; // Temporary bootstrap administrator
   });
 
   const [products, setProducts] = useState<Product[]>(() => {
@@ -2827,7 +2827,7 @@ export default function App() {
     localStorage.clear();
     setConfig(INITIAL_BUSINESS_CONFIG);
     setUsers(INITIAL_USERS);
-    setCurrentUser(INITIAL_USERS[1]); // Agente Neon-Pink
+    setCurrentUser(INITIAL_USERS[0]); // Temporary bootstrap administrator
     setProducts(INITIAL_PRODUCTS);
     setClients(INITIAL_CLIENTS);
     setInvoices(INITIAL_INVOICES);
