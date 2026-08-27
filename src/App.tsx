@@ -53,6 +53,7 @@ import HistorialFacturas from './components/HistorialFacturas';
 import Nomina from './components/Nomina';
 import RestrictedAccess from './components/RestrictedAccess';
 import Creditos from './components/Creditos';
+import InitialSetup from './components/InitialSetup';
 import { playTone } from './utils/soundService';
 import AtomBubble from './components/AtomBubble';
 
@@ -2775,6 +2776,24 @@ export default function App() {
     }
   };
 
+  const handleInitialSetup = async (newConfig: BusinessConfig, newAdmin: User) => {
+    if (!isSupabaseEnabled) {
+      throw new Error('Supabase is required to complete initial setup.');
+    }
+
+    // Persist the administrator first. setup_complete is written last so a
+    // partial failure never unlocks an installation with invalid credentials.
+    await syncUpsert('users', newAdmin);
+    await syncUpsert('business_config', { ...newConfig, id: 'singleton' });
+
+    setUsers([newAdmin]);
+    setCurrentUser(newAdmin);
+    setConfig(newConfig);
+    setIsAuthenticated(false);
+    localStorage.removeItem('extreme_is_authenticated');
+    showToast('Empresa y administrador configurados correctamente.', 'success');
+  };
+
   const handleAddUser = (user: User) => {
     setUsers(prev => [...prev, user]);
     showToast(`Usuario/Agente '${user.fullName}' creado exitosamente`, "success");
@@ -2870,6 +2889,16 @@ export default function App() {
           <p className="text-xs font-mono text-gray-400">Estableciendo enlace y sincronizando base de datos con Supabase. Por favor espere...</p>
         </div>
       </div>
+    );
+  }
+
+  if (!config.setupComplete) {
+    return (
+      <InitialSetup
+        config={config}
+        bootstrapUser={users[0] || INITIAL_USERS[0]}
+        onComplete={handleInitialSetup}
+      />
     );
   }
 
