@@ -22,6 +22,8 @@ create table if not exists business_config (
   email           text,
   invoice_prefix  text default 'EXT',
   tax_rate        numeric(5,2) default 19,
+  card_fee_percentage numeric(5,2) not null default 0,
+  card_fee_enabled boolean not null default false,
   currency        text default 'USD',
   payment_methods jsonb default '[]',
   product_categories jsonb default '[]',

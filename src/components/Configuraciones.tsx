@@ -40,7 +40,7 @@ interface ConfiguracionesProps {
   expenses: Expense[];
   adjustments: StockAdjustment[];
   currentUser: User;
-  onUpdateConfig: (config: BusinessConfig) => void;
+  onUpdateConfig: (config: BusinessConfig) => Promise<boolean>;
   onAddUser: (user: User) => void;
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
@@ -106,6 +106,8 @@ export default function Configuraciones({
   const [cardFeeEnabled, setCardFeeEnabled] = useState(config.cardFeeEnabled || false);
   
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   // Users form state
   const [selectedEditUser, setSelectedEditUser] = useState<User | null>(null);
@@ -385,28 +387,41 @@ export default function Configuraciones({
     reader.readAsDataURL(file);
   };
 
-  const handleConfigSubmit = (e: React.FormEvent) => {
+  const handleConfigSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateConfig({
-      ...config,
-      companyName,
-      commercialName,
-      slogan,
-      city,
-      website,
-      logoUrl,
-      setupComplete: true,
-      rut,
-      address,
-      phone,
-      email,
-      invoicePrefix: prefix,
-      taxRate: parseFloat(taxRate.toString()) || 0,
-      cardFeePercentage: parseFloat(cardFeePercentage.toString()) || 0,
-      cardFeeEnabled
-    });
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    setSaveSuccess(false);
+    setSaveError(null);
+    setIsSavingConfig(true);
+
+    try {
+      const saved = await onUpdateConfig({
+        ...config,
+        companyName,
+        commercialName,
+        slogan,
+        city,
+        website,
+        logoUrl,
+        setupComplete: true,
+        rut,
+        address,
+        phone,
+        email,
+        invoicePrefix: prefix,
+        taxRate: parseFloat(taxRate.toString()) || 0,
+        cardFeePercentage: parseFloat(cardFeePercentage.toString()) || 0,
+        cardFeeEnabled
+      });
+
+      if (saved) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        setSaveError('No fue posible guardar en Supabase. Los cambios no fueron aplicados.');
+      }
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
   // Submit new/edited user
@@ -923,12 +938,18 @@ export default function Configuraciones({
                     <Check size={14} /> ¡Identidad fiscal actualizada exitosamente!
                   </span>
                 )}
+                {saveError && (
+                  <span className="text-red-400 text-[11px]">
+                    {saveError}
+                  </span>
+                )}
                 
                 <button
                   type="submit"
-                  className="ml-auto bg-cyber-pink text-black hover:bg-cyber-accent px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer neon-shadow-pink"
+                  disabled={isSavingConfig}
+                  className="ml-auto bg-cyber-pink text-black hover:bg-cyber-accent px-5 py-2.5 rounded-lg font-bold font-mono text-xs cursor-pointer neon-shadow-pink disabled:opacity-60 disabled:cursor-wait"
                 >
-                  Guardar Parámetros
+                  {isSavingConfig ? 'Guardando...' : 'Guardar Parámetros'}
                 </button>
               </div>
             </form>

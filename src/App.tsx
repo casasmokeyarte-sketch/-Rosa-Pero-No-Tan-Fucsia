@@ -2756,10 +2756,23 @@ export default function App() {
   };
 
   // 7. General config & Users
-  const handleUpdateConfig = (newConfig: BusinessConfig) => {
-    setConfig(newConfig);
-    showToast("Configuración general guardada con éxito", "success");
-    if (isSupabaseEnabled) syncUpsert('business_config', { ...newConfig, id: 'singleton' });
+  const handleUpdateConfig = async (newConfig: BusinessConfig): Promise<boolean> => {
+    try {
+      if (isSupabaseEnabled) {
+        await syncUpsert('business_config', { ...newConfig, id: 'singleton' });
+      }
+
+      setConfig(newConfig);
+      showToast("Configuración general guardada con éxito", "success");
+      return true;
+    } catch (error) {
+      console.error('Business configuration persistence failed:', error);
+      showToast(
+        "No se pudo guardar la configuración en Supabase. Intenta nuevamente.",
+        "error"
+      );
+      return false;
+    }
   };
 
   const handleAddUser = (user: User) => {
