@@ -1014,7 +1014,10 @@ export default function App() {
         if (dbConfig) {
           setConfig(dbConfig);
         } else {
-          await syncUpsert('business_config', { ...config, id: 'singleton' });
+          // No interrumpir la carga de clientes si business_config no está disponible.
+          console.warn(
+            'business_config no está disponible; se conserva la configuración local.'
+          );
         }
 
         if (dbUsers && dbUsers.length > 0) {
