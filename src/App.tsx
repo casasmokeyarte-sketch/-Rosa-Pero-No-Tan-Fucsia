@@ -1024,7 +1024,7 @@ export default function App() {
           setUsers(dbUsers);
         } else {
           for (const u of users) {
-            await syncUpsert('users', u);
+            void u; // Conservar usuarios locales sin intentar sembrarlos durante el arranque.
           }
         }
 
