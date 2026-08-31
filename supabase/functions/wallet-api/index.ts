@@ -19,6 +19,27 @@ const JSON_HEADERS = {
   "Referrer-Policy": "no-referrer",
 };
 const MAX_BODY_BYTES = 32_768;
+const DATA_TABLES = new Set([
+  "business_config",
+  "users",
+  "clients",
+  "products",
+  "invoices",
+  "expenses",
+  "shifts",
+  "stock_adjustments",
+  "stock_transfers",
+  "chat_messages",
+  "client_requests",
+  "discounts",
+  "flash_messages",
+  "payroll_entries",
+]);
+const ADMIN_WRITE_TABLES = new Set([
+  "business_config",
+  "users",
+  "payroll_entries",
+]);
 const SESSION_HOURS_OPERATOR = 12;
 const SESSION_HOURS_CLIENT = 24 * 7;
 const LOGIN_WINDOW_MINUTES = 15;
@@ -130,6 +151,24 @@ function optionalString(value: unknown, maxLength = 200): string | null {
   const normalized = value.trim();
   if (normalized.length > maxLength) throw new Error("Text value is too long");
   return normalized || null;
+}
+
+function requiredDataTable(value: unknown): string {
+  const table = requiredString(value, "table", 80);
+  if (!DATA_TABLES.has(table)) throw new Error("Unsupported data table");
+  return table;
+}
+
+function requiredDataRecord(value: unknown): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new Error("record must be a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireDataWriteAccess(session: WalletSession, table: string): void {
+  requireOperator(session);
+  if (ADMIN_WRITE_TABLES.has(table)) requireAdministrator(session);
 }
 
 function normalizeUid(value: string): string {
@@ -497,6 +536,71 @@ async function handleAuthenticated(
       actor: await getActor(session),
       expires_at: session.expires_at,
     });
+  }
+
+  if (req.method === "GET" && route === "/data") {
+    requireOperator(session);
+    const table = requiredDataTable(url.searchParams.get("table"));
+    let query = admin.from(table).select("*");
+
+    if (table === "chat_messages") {
+      query = query.order("timestamp", { ascending: false }).limit(50);
+    } else if (table === "invoices") {
+      query = query.order("created_at", { ascending: false }).limit(1000);
+    } else if (table === "stock_adjustments") {
+      query = query.order("created_at", { ascending: false }).limit(50);
+    } else if (table === "expenses") {
+      query = query.order("created_at", { ascending: false }).limit(500);
+    } else if (table === "shifts") {
+      query = query.order("start_time", { ascending: false }).limit(30);
+    } else if (table === "payroll_entries") {
+      query = query.order("created_at", { ascending: false }).limit(30);
+    } else if (table === "stock_transfers") {
+      query = query.order("created_at", { ascending: false }).limit(30);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data: data ?? [] });
+  }
+
+  if (req.method === "POST" && route === "/data/upsert") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const record = requiredDataRecord(body.record);
+    const { data, error } = await admin
+      .from(table)
+      .upsert(record)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data });
+  }
+
+  if (req.method === "POST" && route === "/data/delete") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const id = requiredString(body.id, "id", 160);
+    const { error } = await admin.from(table).delete().eq("id", id);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && route === "/data/delete-by-field") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const field = requiredString(body.field, "field", 80);
+    if (!/^[a-z][a-z0-9_]*$/.test(field)) throw new Error("Invalid field name");
+    const value = body.value;
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      throw new Error("Invalid field value");
+    }
+    const { error } = await admin.from(table).delete().eq(field, value);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
   }
 
   if (req.method === "GET" && route === "/products/wallet-eligibility") {
@@ -1351,7 +1455,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 5 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 6 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -1427,6 +1531,9 @@ Deno.serve(async (req) => {
       message.includes("JSON") ||
       message.includes("too large") ||
       message.includes("Invalid NFC UID") ||
+      message.includes("Unsupported data table") ||
+      message.includes("record must be") ||
+      message.includes("Invalid field") ||
       message.includes("Invalid transaction_id") ||
       message.includes("Unsupported office top-up payment method") ||
       message.includes("Unsupported delivery method") ||

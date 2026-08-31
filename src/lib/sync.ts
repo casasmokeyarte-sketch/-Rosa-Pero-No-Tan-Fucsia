@@ -1,4 +1,9 @@
-import { supabase } from './supabase';
+import {
+  fetchSecureDataTable,
+  secureDataDelete,
+  secureDataDeleteByField,
+  secureDataUpsert
+} from './walletApi';
 
 export function toSnakeCase(str: string): string {
   if (str === 'specialPrice1g') return 'special_price_1g';
@@ -64,15 +69,13 @@ export async function syncUpsert(table: string, data: any) {
     console.warn('Blocked demo history upsert:', table, data.id);
     return null;
   }
-  if (!supabase) return null;
   const mapped = mapKeys(data, toSnakeCase);
   let lastError: unknown = null;
 
   // Reuse the same immutable ID on every attempt, making transient retries idempotent.
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const { error } = await supabase.from(table).upsert(mapped);
-      if (error) throw error;
+      await secureDataUpsert(table, mapped);
       return data;
     } catch (error) {
       lastError = error;
@@ -87,50 +90,25 @@ export async function syncUpsert(table: string, data: any) {
 }
 
 export async function syncDelete(table: string, id: string) {
-  if (!supabase) return null;
-  const { error } = await supabase.from(table).delete().eq('id', id);
-  if (error) {
+  try {
+    await secureDataDelete(table, id);
+  } catch (error) {
     console.error(`Error deleting from table ${table} with id ${id}:`, error);
     throw error;
   }
 }
 
 export async function syncDeleteByField(table: string, fieldName: string, fieldValue: string) {
-  if (!supabase) return null;
-  const { error } = await supabase.from(table).delete().eq(toSnakeCase(fieldName), fieldValue);
-  if (error) {
+  try {
+    await secureDataDeleteByField(table, toSnakeCase(fieldName), fieldValue);
+  } catch (error) {
     console.error(`Error deleting from table ${table} where ${fieldName}=${fieldValue}:`, error);
     throw error;
   }
 }
 
 export async function fetchTable(table: string): Promise<any[]> {
-  if (!supabase) return [];
-  
-  let query = supabase.from(table).select('*');
-  
-  // Optimización de rendimiento para tablas de historial / logs masivos
-  if (table === 'chat_messages') {
-    query = query.order('timestamp', { ascending: false }).limit(50);
-  } else if (table === 'invoices') {
-    query = query.order('created_at', { ascending: false }).limit(1000);
-  } else if (table === 'stock_adjustments') {
-    query = query.order('created_at', { ascending: false }).limit(50);
-  } else if (table === 'expenses') {
-    query = query.order('created_at', { ascending: false }).limit(500);
-  } else if (table === 'shifts') {
-    query = query.order('start_time', { ascending: false }).limit(30);
-  } else if (table === 'payroll_entries') {
-    query = query.order('created_at', { ascending: false }).limit(30);
-  } else if (table === 'stock_transfers') {
-    query = query.order('created_at', { ascending: false }).limit(30);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error(`Error fetching table ${table}:`, error);
-    return [];
-  }
+  const { data } = await fetchSecureDataTable(table);
   return mapKeys(data, toCamelCase) || [];
 }
 
@@ -161,11 +139,6 @@ export async function syncMissingRecords(
   );
 }
 export async function fetchConfig(): Promise<any | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.from('business_config').select('*').eq('id', 'singleton').maybeSingle();
-  if (error) {
-    console.error("Error fetching config:", error);
-    return null;
-  }
-  return data ? mapKeys(data, toCamelCase) : null;
+  const rows = await fetchTable('business_config');
+  return rows.find((row) => row.id === 'singleton') ?? rows[0] ?? null;
 }
