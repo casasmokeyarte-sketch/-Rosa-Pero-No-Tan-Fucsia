@@ -37,6 +37,7 @@ const DATA_TABLES = new Set([
 ]);
 const ADMIN_WRITE_TABLES = new Set([
   "business_config",
+  "discounts",
   "users",
   "payroll_entries",
 ]);
@@ -169,6 +170,162 @@ function requiredDataRecord(value: unknown): Record<string, unknown> {
 function requireDataWriteAccess(session: WalletSession, table: string): void {
   requireOperator(session);
   if (ADMIN_WRITE_TABLES.has(table)) requireAdministrator(session);
+}
+
+type ActiveWebPromotion = {
+  id: string;
+  name: string;
+  amount: number;
+};
+
+function bogotaDateParts(now = new Date()): {
+  date: string;
+  time: string;
+  day: number;
+} {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    weekday: "short",
+  }).formatToParts(now);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    time: `${value("hour")}:${value("minute")}`,
+    day: weekdayMap[value("weekday")] ?? now.getUTCDay(),
+  };
+}
+
+async function activeWebPromotion(
+  clientId: string,
+  subtotal: number,
+): Promise<ActiveWebPromotion | null> {
+  if (!Number.isFinite(subtotal) || subtotal <= 0) return null;
+
+  const { data: client, error: clientError } = await admin
+    .from("clients")
+    .select("special_discount_percentage")
+    .eq("id", clientId)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  if (Number(client?.special_discount_percentage ?? 0) > 0) return null;
+
+  const { data: promotions, error } = await admin
+    .from("discounts")
+    .select("id,name,type,value,start_date,end_date,start_time,end_time,active_days,applies_to")
+    .eq("active", true)
+    .in("applies_to", ["todos", "compras_web"]);
+  if (error) throw error;
+
+  const bogota = bogotaDateParts();
+  const eligible = (promotions ?? [])
+    .filter((promotion) => {
+      if (promotion.start_date && bogota.date < promotion.start_date) return false;
+      if (promotion.end_date && bogota.date > promotion.end_date) return false;
+      if (promotion.start_time && bogota.time < promotion.start_time) return false;
+      if (promotion.end_time && bogota.time > promotion.end_time) return false;
+      if (
+        Array.isArray(promotion.active_days) &&
+        promotion.active_days.length > 0 &&
+        !promotion.active_days.includes(bogota.day)
+      ) return false;
+      return true;
+    })
+    .map((promotion) => {
+      const rawAmount = promotion.type === "porcentaje"
+        ? subtotal * Number(promotion.value ?? 0) / 100
+        : Number(promotion.value ?? 0);
+      return {
+        id: String(promotion.id),
+        name: String(promotion.name),
+        amount: Math.min(subtotal, Math.max(0, Math.round(rawAmount))),
+      };
+    })
+    .filter((promotion) => promotion.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  return eligible[0] ?? null;
+}
+
+async function applyWebPromotionToResult(
+  rawResult: Record<string, unknown>,
+  clientId: string,
+  updateBoldIntent = false,
+): Promise<Record<string, unknown>> {
+  const invoiceValue = rawResult.invoice;
+  const invoice = typeof invoiceValue === "object" && invoiceValue !== null
+    ? invoiceValue as Record<string, unknown>
+    : null;
+  if (!invoice || Number(invoice.discount ?? 0) > 0) return rawResult;
+
+  const invoiceId = requiredString(invoice.id, "invoice_id", 120);
+  const subtotal = Number(invoice.subtotal ?? 0);
+  const promotion = await activeWebPromotion(clientId, subtotal);
+  if (!promotion) return rawResult;
+
+  const deliveryFee = Number(invoice.delivery_fee ?? 0);
+  const walletPaidAmount = Number(invoice.wallet_paid_amount ?? 0);
+  const total = Math.max(0, Math.round(subtotal - promotion.amount + deliveryFee));
+  const amountDue = Math.max(0, Math.round(total - walletPaidAmount));
+  const paymentStatus = amountDue <= 0 ? "Pagado" : "Pendiente";
+
+  const { data: updatedInvoice, error: invoiceError } = await admin
+    .from("invoices")
+    .update({
+      discount: promotion.amount,
+      total,
+      amount_due: amountDue,
+      payment_status: paymentStatus,
+    })
+    .eq("id", invoiceId)
+    .select()
+    .single();
+  if (invoiceError) throw invoiceError;
+
+  let updatedIntent = rawResult.intent;
+  if (updateBoldIntent) {
+    const intentValue = rawResult.intent;
+    const intent = typeof intentValue === "object" && intentValue !== null
+      ? intentValue as Record<string, unknown>
+      : null;
+    if (!intent) throw new Error("Direct Bold payment intent was not returned");
+    const intentId = requiredString(intent.id, "intent_id", 120);
+    const { data: savedIntent, error: intentError } = await admin
+      .from("web_bold_payment_intents")
+      .update({ amount: total })
+      .eq("id", intentId)
+      .select()
+      .single();
+    if (intentError) throw intentError;
+    updatedIntent = savedIntent;
+  }
+
+  return {
+    ...rawResult,
+    invoice: updatedInvoice,
+    intent: updatedIntent,
+    promotion: {
+      id: promotion.id,
+      name: promotion.name,
+      amount: promotion.amount,
+    },
+  };
 }
 
 function normalizeUid(value: string): string {
@@ -1057,8 +1214,15 @@ async function handleAuthenticated(
       p_session_id: session.id,
     });
     if (error) throw error;
+    const result = typeof data === "object" && data !== null
+      ? await applyWebPromotionToResult(
+        data as Record<string, unknown>,
+        session.client_id,
+      )
+      : null;
+    if (!result) throw new Error("Failed to create wallet invoice");
 
-    return response(origin, 201, { ok: true, ...data });
+    return response(origin, 201, { ok: true, ...result });
   }
 
   if (req.method === "POST" && route === "/web/bold-payment-intent") {
@@ -1150,16 +1314,22 @@ async function handleAuthenticated(
 
     if (error) throw error;
 
-    const result =
+    const rawResult =
       typeof data === "object" && data !== null
         ? data as Record<string, unknown>
         : null;
 
-    if (!result) {
+    if (!rawResult) {
       throw new Error(
         "Failed to create direct Bold payment intent",
       );
     }
+
+    const result = await applyWebPromotionToResult(
+      rawResult,
+      session.client_id,
+      true,
+    );
 
     const intentValue = result.intent;
     const intent =
@@ -1455,7 +1625,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 6 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 7 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");

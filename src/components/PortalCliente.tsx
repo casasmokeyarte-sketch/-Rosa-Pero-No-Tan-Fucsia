@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import BolsilloCliente, { OfficialBoldButton } from './BolsilloCliente';
 import AyudaCliente from './AyudaCliente';
 import { BoldCheckout, createDirectBoldPaymentIntent, fetchWallet, getWalletSession, purchaseWithWallet } from '../lib/walletApi';
-import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, FlashMessage, getClientBillingBlockReason } from '../types';
+import { Client, Product, Invoice, InvoiceItem, BusinessConfig, ChatMessage, ChatAttachment, ClientRequest, Discount, FlashMessage, getClientBillingBlockReason } from '../types';
 import { playTone, TONE_NAMES } from '../utils/soundService';
 import { 
   Truck, 
@@ -42,6 +42,7 @@ interface PortalClienteProps {
   products: Product[];
   invoices: Invoice[];
   config: BusinessConfig;
+  discounts: Discount[];
   onAddInvoice: (invoice: Invoice) => void;
   onLogout: () => void;
   chatMessages: ChatMessage[];
@@ -67,6 +68,7 @@ export default function PortalCliente({
   products, 
   invoices, 
   config, 
+  discounts = [],
   onAddInvoice, 
   onLogout,
   chatMessages,
@@ -328,7 +330,36 @@ export default function PortalCliente({
     }
   }, [client, cart, cartSubtotal]);
 
-  const cartTotal = Math.max(0, cartSubtotal - clientDiscount) + cartTax + deliveryCost + cardFee;
+  const activeWebPromotion = useMemo(() => {
+    if (clientDiscount > 0) return null;
+
+    const now = new Date();
+    const day = now.getDay();
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    return discounts
+      .filter(discount => {
+        if (!discount.active) return false;
+        if (discount.appliesTo !== 'todos' && discount.appliesTo !== 'compras_web') return false;
+        if (discount.startDate && now < new Date(`${discount.startDate}T00:00:00`)) return false;
+        if (discount.endDate && now > new Date(`${discount.endDate}T23:59:59`)) return false;
+        if (discount.startTime && time < discount.startTime) return false;
+        if (discount.endTime && time > discount.endTime) return false;
+        if (discount.activeDays?.length && !discount.activeDays.includes(day)) return false;
+        return true;
+      })
+      .map(discount => ({
+        discount,
+        amount: discount.type === 'porcentaje'
+          ? Math.min(cartSubtotal, Math.round(cartSubtotal * (discount.value / 100)))
+          : Math.min(cartSubtotal, Math.round(discount.value))
+      }))
+      .sort((a, b) => b.amount - a.amount)[0] ?? null;
+  }, [clientDiscount, discounts, cartSubtotal]);
+
+  const generalWebDiscount = activeWebPromotion?.amount ?? 0;
+  const effectiveDiscount = clientDiscount > 0 ? clientDiscount : generalWebDiscount;
+  const cartTotal = Math.max(0, cartSubtotal - effectiveDiscount) + cartTax + deliveryCost + cardFee;
 
   const prepareWalletCheckout = async () => {
     setPaymentOption('wallet');
@@ -431,7 +462,7 @@ export default function PortalCliente({
       clientRut: client.rut,
       items: invoiceItems,
       subtotal: cartSubtotal,
-      discount: 0,
+      discount: effectiveDiscount,
       taxRate: 0,
       taxAmount: 0,
       total: cartTotal,
@@ -1520,6 +1551,16 @@ export default function PortalCliente({
                                     $15.000 COP
                                   </div>
                                 </div>
+                              </div>
+                            )}
+                            {effectiveDiscount > 0 && (
+                              <div className="flex justify-between text-cyber-green">
+                                <span>
+                                  {clientDiscount > 0
+                                    ? `Descuento especial (${client.specialDiscountPercentage}%)`
+                                    : `Promoción: ${activeWebPromotion?.discount.name}`}
+                                </span>
+                                <span className="font-bold">-${effectiveDiscount.toLocaleString('es-CO')} COP</span>
                               </div>
                             )}
                           </div>
