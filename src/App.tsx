@@ -31,8 +31,10 @@ import {
 import { supabase, isSupabaseEnabled } from './lib/supabase';
 import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
 import {
+  changeWalletClientPassword,
   clearActiveWalletOperatorSession,
   getActiveWalletOperatorSession,
+  getWalletSession,
   loginWalletClient,
   loginWalletOperator,
   saveWalletOperatorSession,
@@ -744,11 +746,15 @@ export default function App() {
         clientLoginPassword
       );
 
-      const clientToLogin = clients.find(
-        client => client.id === result.actor.id
-      );
+      const localClient = clients.find(client => client.id === result.actor.id);
+      const secureClient = mapKeys(result.client, toCamelCase) as Client;
+      const clientToLogin: Client = {
+        ...(localClient || {} as Client),
+        ...secureClient,
+        password: result.requires_password_change ? '1234' : '__configured__'
+      };
 
-      if (!clientToLogin) {
+      if (!clientToLogin.id) {
         setLoginError(
           "CUENTA NO DISPONIBLE: Actualiza la página e intenta nuevamente."
         );
@@ -760,10 +766,10 @@ export default function App() {
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
-    } catch {
-      setLoginError(
-        "CREDENCIALES INCORRECTAS O ACCESO TEMPORALMENTE BLOQUEADO. Verifica el código y la contraseña."
-      );
+    } catch (error) {
+      setLoginError(error instanceof Error
+        ? error.message
+        : "No fue posible iniciar sesión. Verifica el código y la contraseña.");
     }
   };
 
@@ -2903,10 +2909,9 @@ export default function App() {
             password: newClientPassword.trim()
           };
 
-          // Sync to Supabase
-          if (isSupabaseEnabled) {
-            await syncUpsert('clients', updatedClient);
-          }
+          const token = getWalletSession(currentClient.id);
+          if (!token) throw new Error('La sesión del cliente venció. Inicia sesión nuevamente.');
+          await changeWalletClientPassword(token, newClientPassword.trim());
 
           // Update local state
           setClients(prev => prev.map(c => c.id === currentClient.id ? updatedClient : c));
