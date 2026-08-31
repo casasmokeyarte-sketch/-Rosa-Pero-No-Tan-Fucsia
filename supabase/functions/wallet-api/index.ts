@@ -737,6 +737,62 @@ async function handleAuthenticated(
     return response(origin, 200, { ok: true });
   }
 
+  if (req.method === "GET" && route === "/client/chat") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const { data, error } = await admin
+      .from("chat_messages")
+      .select("id,client_id,sender,sender_name,text,attachment,timestamp")
+      .eq("client_id", session.client_id)
+      .order("timestamp", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data: (data ?? []).reverse() });
+  }
+
+  if (req.method === "POST" && route === "/client/chat") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const body = await parseJson(req);
+    const id = requiredString(body.id, "id", 160);
+    const messageText = optionalString(body.text, 4000) ?? "";
+    const attachment = body.attachment ?? null;
+    if (!messageText && !attachment) throw new Error("Message content is required");
+    if (attachment !== null) {
+      if (Array.isArray(attachment) || typeof attachment !== "object") {
+        throw new Error("Invalid chat attachment");
+      }
+      if (JSON.stringify(attachment).length > 20_000) {
+        throw new Error("Chat attachment is too large");
+      }
+    }
+
+    const { data: client, error: clientError } = await admin
+      .from("clients")
+      .select("name")
+      .eq("id", session.client_id)
+      .single();
+    if (clientError) throw clientError;
+
+    const { data, error } = await admin
+      .from("chat_messages")
+      .insert({
+        id,
+        client_id: session.client_id,
+        sender: "client",
+        sender_name: client.name,
+        text: messageText,
+        attachment,
+        timestamp: new Date().toISOString(),
+      })
+      .select("id,client_id,sender,sender_name,text,attachment,timestamp")
+      .single();
+    if (error) throw error;
+    return response(origin, 201, { ok: true, data });
+  }
+
   if (req.method === "GET" && route === "/data") {
     requireOperator(session);
     const table = requiredDataTable(url.searchParams.get("table"));
@@ -1667,7 +1723,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 8 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 9 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");

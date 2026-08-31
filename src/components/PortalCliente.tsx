@@ -811,33 +811,7 @@ export default function PortalCliente({
       client.name
     );
     
-    const inputCopy = userInputMessage.trim().toLowerCase();
     setUserInputMessage('');
-    setIsAgentTyping(true);
-
-    // Dynamic responses representing cyberpunk characters
-    setTimeout(() => {
-      let replyText = '';
-      if (inputCopy.includes('pedido') || inputCopy.includes('despacho') || inputCopy.includes('orden')) {
-        replyText = `Entendido. Verificamos que tu cuenta registra ${invoices.filter(i => i.clientId === client.id).length} remisiones en base de datos. Si acabas de emitir una orden online, su estatus está como 'Pendiente' y el domiciliario asignado procederá de inmediato.`;
-      } else if (inputCopy.includes('precio') || inputCopy.includes('costo') || inputCopy.includes('stock') || inputCopy.includes('inventario')) {
-        replyText = `El inventario operativo está sincronizado con el búnker de carga en tiempo real. Puedes consultar la pestaña 'Stock e Insumos' para ver cantidades exactas antes de consolidar el pedido.`;
-      } else if (inputCopy.includes('hola') || inputCopy.includes('buenos') || inputCopy.includes('saludos')) {
-        replyText = `Conexión establecida con éxito. Aquí reporta el Agente Neon-Pink. Listo para agilizar la logística de tus pedidos corporativos. ¿Hay algún requerimiento especial con la ruta de hoy?`;
-      } else if (inputCopy.includes('demora') || inputCopy.includes('tarde') || inputCopy.includes('retraso')) {
-        replyText = `Nuestras unidades de transporte blindado y motocicletas cibernéticas operan bajo el protocolo de máxima prioridad. Por favor verifica la pestaña 'Trayectoria' para monitorear el estado 'En Camino' del mensajero.`;
-      } else {
-        replyText = `Solicitud procesada por los servidores de Rosa Fuerte S.A.S. Tomamos nota de tu mensaje. Procederemos a coordinar con la tripulación para brindarte el soporte prioritario que requiere tu facción.`;
-      }
-
-      onSendMessage(
-        client.id,
-        replyText,
-        'agent',
-        'Agente Neon-Pink'
-      );
-      setIsAgentTyping(false);
-    }, 1500);
   };
 
   // Get active deliveries for this client
