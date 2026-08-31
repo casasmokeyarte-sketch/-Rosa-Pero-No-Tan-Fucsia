@@ -232,9 +232,22 @@ export async function loginWalletClient(code: string, password: string) {
     token: string;
     expires_at: string;
     actor: { id: string; name: string; type: 'client' };
+    client: Record<string, unknown>;
+    requires_password_change: boolean;
   }>('/login/client', {
     method: 'POST',
     body: JSON.stringify({ code, password })
+  });
+}
+
+export async function changeWalletClientPassword(
+  token: string,
+  newPassword: string
+) {
+  return walletRequest<{ ok: true }>('/client/password', {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ new_password: newPassword })
   });
 }
 

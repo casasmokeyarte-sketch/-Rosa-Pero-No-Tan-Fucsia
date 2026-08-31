@@ -506,6 +506,24 @@ async function login(
     return response(origin, 401, { ok: false, error: "Credenciales incorrectas." });
   }
 
+  let clientProfile: Record<string, unknown> | null = null;
+  let requiresPasswordChange = false;
+  if (actorType === "client") {
+    const { data: client, error: clientError } = await admin
+      .from("clients")
+      .select(
+        "id,name,document_type,rut,email,phone,address,credit_limit,outstanding_balance,created_at,assigned_agent_id,assigned_agent_name,code,has_credit,credit_terms_days,credit_conditions,is_employee,special_discount_percentage,discounted_product_ids,chat_sound_tone,notif_sound_tone,password",
+      )
+      .eq("id", actor.actor_id)
+      .single();
+    if (clientError) throw clientError;
+    if (!client) throw new Error("Client profile not found");
+    const { password: legacyPassword, ...safeClient } = client;
+    requiresPasswordChange = !String(legacyPassword ?? "").trim() ||
+      String(legacyPassword).trim() === "1234";
+    clientProfile = safeClient;
+  }
+
   const rawToken = randomToken();
   const tokenHash = await sha256Hex(`${rawToken}:${sessionPepper}`);
   const sessionHours = actorType === "operator"
@@ -550,6 +568,12 @@ async function login(
       role: actor.actor_role,
       type: actorType,
     },
+    ...(actorType === "client"
+      ? {
+        client: clientProfile,
+        requires_password_change: requiresPasswordChange,
+      }
+      : {}),
   });
 }
 
@@ -693,6 +717,24 @@ async function handleAuthenticated(
       actor: await getActor(session),
       expires_at: session.expires_at,
     });
+  }
+
+  if (req.method === "PATCH" && route === "/client/password") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const body = await parseJson(req);
+    const newPassword = requiredString(body.new_password, "new_password", 256);
+    if (newPassword === "1234") {
+      throw new Error("La contraseña nueva no puede ser la clave temporal.");
+    }
+
+    const { error } = await admin
+      .from("clients")
+      .update({ password: newPassword })
+      .eq("id", session.client_id);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
   }
 
   if (req.method === "GET" && route === "/data") {
@@ -1625,7 +1667,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 7 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 8 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
