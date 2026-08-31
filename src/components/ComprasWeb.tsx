@@ -171,12 +171,17 @@ export default function ComprasWeb({ invoices, config, onUpdateInvoice, products
     }
 
     const calculatedSubtotal = editedItems.reduce((sum, item) => sum + item.total, 0);
-    const calculatedTotal = calculatedSubtotal + editedDeliveryFee;
+    const preservedDiscount = Math.min(
+      calculatedSubtotal,
+      Math.max(0, reviewInvoice.discount || 0)
+    );
+    const calculatedTotal = calculatedSubtotal - preservedDiscount + editedDeliveryFee;
 
     const approvedInvoice: Invoice = {
       ...reviewInvoice,
       items: editedItems,
       subtotal: calculatedSubtotal,
+      discount: preservedDiscount,
       deliveryFee: editedDeliveryFee,
       total: calculatedTotal,
       guideAddress: editedAddress,

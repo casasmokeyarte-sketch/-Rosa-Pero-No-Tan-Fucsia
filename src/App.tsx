@@ -435,6 +435,25 @@ export default function App() {
 
   useEffect(() => { safeSetItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
 
+  const handleUpdateDiscounts = (nextDiscounts: Discount[]) => {
+    const previousDiscounts = discounts;
+    setDiscounts(nextDiscounts);
+
+    if (!isSupabaseEnabled) return;
+
+    const nextIds = new Set(nextDiscounts.map(discount => discount.id));
+    const removed = previousDiscounts.filter(discount => !nextIds.has(discount.id));
+    const changed = nextDiscounts.filter(discount => {
+      const previous = previousDiscounts.find(item => item.id === discount.id);
+      return !previous || JSON.stringify(previous) !== JSON.stringify(discount);
+    });
+
+    void Promise.allSettled([
+      ...changed.map(discount => syncUpsert('discounts', discount)),
+      ...removed.map(discount => syncDelete('discounts', discount.id))
+    ]);
+  };
+
   useEffect(() => { safeSetItem('extreme_users', JSON.stringify(users)); }, [users]);
 
   useEffect(() => { safeSetItem('extreme_clients', JSON.stringify(clients)); }, [clients]);
@@ -1173,6 +1192,10 @@ export default function App() {
             const dbDiscounts = await fetchTable('discounts');
             if (dbDiscounts && dbDiscounts.length > 0) {
               setDiscounts(dbDiscounts);
+            } else if (discounts.length > 0) {
+              await Promise.allSettled(
+                discounts.map(discount => syncUpsert('discounts', discount))
+              );
             }
           } catch (e) {
             console.error("Error cargando discounts en segundo plano:", e);
@@ -2996,6 +3019,7 @@ export default function App() {
         products={products}
         invoices={invoices}
         config={config}
+        discounts={discounts}
         onAddInvoice={handleAddInvoice}
         onLogout={() => setCurrentClient(null)}
         chatMessages={chatMessages}
@@ -3902,7 +3926,7 @@ export default function App() {
               onResetDatabase={handleResetDatabase}
               onImportDatabase={handleImportDatabase}
               discounts={discounts}
-              onUpdateDiscounts={setDiscounts}
+              onUpdateDiscounts={handleUpdateDiscounts}
               flashMessages={flashMessages}
               onUpdateFlashMessages={setFlashMessages}
               soundSettings={soundSettings}

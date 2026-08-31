@@ -147,7 +147,7 @@ export interface Discount {
   startTime?: string;
   endTime?: string;
   activeDays: number[];
-  appliesTo: 'todos' | 'facturacion' | 'domicilios';
+  appliesTo: 'todos' | 'facturacion' | 'domicilios' | 'compras_web';
   createdAt: string;
 }
 

@@ -219,7 +219,7 @@ export default function Configuraciones({
   const [promoStartTime, setPromoStartTime] = useState('');
   const [promoEndTime, setPromoEndTime] = useState('');
   const [promoActiveDays, setPromoActiveDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]); // All days
-  const [promoAppliesTo, setPromoAppliesTo] = useState<'todos' | 'facturacion' | 'domicilios'>('todos');
+  const [promoAppliesTo, setPromoAppliesTo] = useState<'todos' | 'facturacion' | 'domicilios' | 'compras_web'>('todos');
   const [promoActive, setPromoActive] = useState(true);
 
   // Flash Reminders Form state
@@ -1741,9 +1741,10 @@ export default function Configuraciones({
                 onChange={e => setPromoAppliesTo(e.target.value as any)}
                 className="w-full bg-cyber-bg border border-cyber-border p-2 rounded-lg text-white text-xs focus:outline-none"
               >
-                <option value="todos">Caja y Domicilios (Todos)</option>
+                <option value="todos">Caja, Domicilios y Compras Web (Todos)</option>
                 <option value="facturacion">Solo Facturación de Caja</option>
                 <option value="domicilios">Solo Entregas a Domicilio</option>
+                <option value="compras_web">Solo Compras Web</option>
               </select>
             </div>
 
@@ -1867,7 +1868,13 @@ export default function Configuraciones({
                         {d.type === 'porcentaje' ? `${d.value}%` : `$${d.value.toFixed(2)}`}
                       </td>
                       <td className="p-3 capitalize text-gray-400 font-semibold">
-                        {d.appliesTo === 'todos' ? 'Todos' : d.appliesTo === 'facturacion' ? 'POS Caja' : 'Domicilios'}
+                        {d.appliesTo === 'todos'
+                          ? 'Todos'
+                          : d.appliesTo === 'facturacion'
+                            ? 'POS Caja'
+                            : d.appliesTo === 'compras_web'
+                              ? 'Compras Web'
+                              : 'Domicilios'}
                       </td>
                       <td className="p-3 text-[10px] text-gray-500">
                         {d.startDate ? `Desde: ${d.startDate}` : 'Siempre'}
