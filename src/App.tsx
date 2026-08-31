@@ -33,12 +33,14 @@ import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toC
 import {
   changeWalletClientPassword,
   clearActiveWalletOperatorSession,
+  fetchWalletClientChat,
   getActiveWalletOperatorSession,
   getWalletSession,
   loginWalletClient,
   loginWalletOperator,
   saveWalletOperatorSession,
-  saveWalletSession
+  saveWalletSession,
+  sendWalletClientChatMessage
 } from './lib/walletApi';
 
 // Component Imports
@@ -625,7 +627,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = (
+  const handleSendMessage = async (
     clientId: string, 
     text: string, 
     sender: 'client' | 'agent', 
@@ -642,8 +644,90 @@ export default function App() {
       attachment
     };
     setChatMessages(prev => [...prev, newMsg]);
-    if (isSupabaseEnabled) syncUpsert('chat_messages', newMsg);
+
+    try {
+      if (sender === 'client' && currentClient?.id === clientId) {
+        const token = getWalletSession(clientId);
+        if (!token) throw new Error('La sesión del cliente venció. Inicia sesión nuevamente.');
+        const result = await sendWalletClientChatMessage(token, {
+          id: newMsg.id,
+          text: newMsg.text,
+          attachment: newMsg.attachment
+        });
+        const savedMessage = mapKeys(result.data, toCamelCase) as ChatMessage;
+        setChatMessages(prev => prev.map(message =>
+          message.id === newMsg.id ? savedMessage : message
+        ));
+      } else if (sender === 'agent' && currentClient) {
+        // Mensajes automáticos visibles en el portal no pueden suplantar a un asesor.
+        return;
+      } else if (isSupabaseEnabled) {
+        await syncUpsert('chat_messages', newMsg);
+      }
+    } catch (error) {
+      setChatMessages(prev => prev.filter(message => message.id !== newMsg.id));
+      showToast(
+        error instanceof Error ? error.message : 'No fue posible enviar el mensaje.',
+        'error'
+      );
+    }
   };
+
+  useEffect(() => {
+    if (!currentClient) return;
+    const token = getWalletSession(currentClient.id);
+    if (!token) return;
+
+    let active = true;
+    const refreshClientChat = async () => {
+      try {
+        const result = await fetchWalletClientChat(token);
+        if (!active) return;
+        const remoteMessages = result.data.map(row =>
+          mapKeys(row, toCamelCase) as ChatMessage
+        );
+        setChatMessages(remoteMessages.sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        ));
+      } catch (error) {
+        console.warn('No fue posible actualizar el chat del cliente:', error);
+      }
+    };
+
+    void refreshClientChat();
+    const timer = window.setInterval(refreshClientChat, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [currentClient?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !getActiveWalletOperatorSession()) return;
+    let active = true;
+    const refreshOperatorChat = async () => {
+      try {
+        const remoteMessages = await fetchTable('chat_messages');
+        if (!active) return;
+        setChatMessages(prev => {
+          const merged = new Map(prev.map(message => [message.id, message]));
+          remoteMessages.forEach(message => merged.set(message.id, message));
+          return Array.from(merged.values()).sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+        });
+      } catch (error) {
+        console.warn('No fue posible actualizar el chat del operador:', error);
+      }
+    };
+
+    void refreshOperatorChat();
+    const timer = window.setInterval(refreshOperatorChat, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isAuthenticated]);
 
   const handleAssignAgent = (clientId: string, agentId: string, agentName: string) => {
     let updatedClient: Client | undefined;

@@ -251,6 +251,31 @@ export async function changeWalletClientPassword(
   });
 }
 
+export async function fetchWalletClientChat(token: string) {
+  return walletRequest<{ ok: true; data: Record<string, unknown>[] }>(
+    '/client/chat',
+    { token }
+  );
+}
+
+export async function sendWalletClientChatMessage(
+  token: string,
+  message: {
+    id: string;
+    text: string;
+    attachment?: unknown;
+  }
+) {
+  return walletRequest<{ ok: true; data: Record<string, unknown> }>(
+    '/client/chat',
+    {
+      method: 'POST',
+      token,
+      body: JSON.stringify(message)
+    }
+  );
+}
+
 function requireActiveOperatorToken(): string {
   const token = getActiveWalletOperatorSession();
   if (!token) throw new Error('No hay una sesión de operador activa.');
