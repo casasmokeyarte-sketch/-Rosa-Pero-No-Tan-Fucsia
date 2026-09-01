@@ -246,6 +246,14 @@ export async function completeInitialCompanySetup(
   );
 }
 
+export async function fetchInitialCompanySetupStatus() {
+  return walletRequest<{
+    ok: true;
+    configured: boolean;
+    config: Record<string, unknown> | null;
+  }>('/setup/status');
+}
+
 export async function loginWalletClient(code: string, password: string) {
   return walletRequest<{
     ok: true;

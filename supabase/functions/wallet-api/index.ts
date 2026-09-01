@@ -534,6 +534,46 @@ async function completeInitialSetup(
   });
 }
 
+async function initialSetupStatus(origin: string | null): Promise<Response> {
+  const { data, error } = await admin
+    .from("business_config")
+    .select(
+      "company_name,commercial_name,slogan,city,website,logo_url,setup_complete,rut,address,phone,email,invoice_prefix,tax_rate,currency,payment_methods,product_categories,card_fee_percentage,card_fee_enabled",
+    )
+    .eq("id", "singleton")
+    .maybeSingle();
+  if (error) throw error;
+
+  if (!data?.setup_complete) {
+    return response(origin, 200, { ok: true, configured: false, config: null });
+  }
+
+  return response(origin, 200, {
+    ok: true,
+    configured: true,
+    config: {
+      companyName: data.company_name,
+      commercialName: data.commercial_name,
+      slogan: data.slogan,
+      city: data.city,
+      website: data.website,
+      logoUrl: data.logo_url,
+      setupComplete: true,
+      rut: data.rut,
+      address: data.address,
+      phone: data.phone,
+      email: data.email,
+      invoicePrefix: data.invoice_prefix,
+      taxRate: Number(data.tax_rate ?? 0),
+      currency: data.currency,
+      paymentMethods: data.payment_methods,
+      productCategories: data.product_categories,
+      cardFeePercentage: Number(data.card_fee_percentage ?? 0),
+      cardFeeEnabled: Boolean(data.card_fee_enabled),
+    },
+  });
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
@@ -1845,7 +1885,10 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 10 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 11 });
+    }
+    if (req.method === "GET" && route === "/setup/status") {
+      return await initialSetupStatus(origin);
     }
     if (req.method === "POST" && route === "/setup/initial") {
       return await completeInitialSetup(req, origin);

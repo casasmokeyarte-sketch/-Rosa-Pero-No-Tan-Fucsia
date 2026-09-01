@@ -34,6 +34,7 @@ import {
   changeWalletClientPassword,
   clearActiveWalletOperatorSession,
   completeInitialCompanySetup,
+  fetchInitialCompanySetupStatus,
   fetchWalletClientChat,
   getActiveWalletOperatorSession,
   getWalletSession,
@@ -164,6 +165,7 @@ function safeSetItem(key: string, value: string) {
 export default function App() {
   
   const [isLoadingDB, setIsLoadingDB] = useState<boolean>(false);
+  const [isCheckingSetup, setIsCheckingSetup] = useState<boolean>(isSupabaseEnabled);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   
   // State Initialization with lazy LocalStorage loading
@@ -173,6 +175,34 @@ export default function App() {
   });
   const businessLogo = config.logoUrl || '/images/logo_cyberpunk_1783131526095.jpg';
   const businessDisplayName = config.commercialName || config.companyName;
+
+  useEffect(() => {
+    if (!isSupabaseEnabled) {
+      setIsCheckingSetup(false);
+      return;
+    }
+
+    let active = true;
+    fetchInitialCompanySetupStatus()
+      .then(result => {
+        if (!active || !result.configured || !result.config) return;
+        setConfig(previous => ({
+          ...previous,
+          ...(result.config as Partial<BusinessConfig>),
+          setupComplete: true
+        }));
+      })
+      .catch(error => {
+        console.error('Initial setup status check failed:', error);
+      })
+      .finally(() => {
+        if (active) setIsCheckingSetup(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('extreme_users');
@@ -2982,7 +3012,7 @@ export default function App() {
   ];
 
   // Render Loading screen while connecting to Supabase
-  if (isLoadingDB) {
+  if (isLoadingDB || isCheckingSetup) {
     return (
       <div className="min-h-screen bg-cyber-bg text-gray-200 font-sans flex flex-col items-center justify-center relative overflow-hidden scanlines p-4">
         <div className="text-center space-y-4 relative z-10 max-w-md">
