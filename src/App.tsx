@@ -33,6 +33,7 @@ import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toC
 import {
   changeWalletClientPassword,
   clearActiveWalletOperatorSession,
+  completeInitialCompanySetup,
   fetchWalletClientChat,
   getActiveWalletOperatorSession,
   getWalletSession,
@@ -2870,15 +2871,22 @@ export default function App() {
     }
   };
 
-  const handleInitialSetup = async (newConfig: BusinessConfig, newAdmin: User) => {
+  const handleInitialSetup = async (
+    newConfig: BusinessConfig,
+    newAdmin: User,
+    setupToken: string
+  ) => {
     if (!isSupabaseEnabled) {
       throw new Error('Supabase is required to complete initial setup.');
     }
 
-    // Persist the administrator first. setup_complete is written last so a
-    // partial failure never unlocks an installation with invalid credentials.
-    await syncUpsert('users', newAdmin);
-    await syncUpsert('business_config', { ...newConfig, id: 'singleton' });
+    // The Edge Function performs both inserts in one locked database
+    // transaction and refuses to run after the installation is configured.
+    await completeInitialCompanySetup(
+      { ...newConfig, id: 'singleton' },
+      newAdmin as unknown as Record<string, unknown>,
+      setupToken
+    );
 
     setUsers([newAdmin]);
     setCurrentUser(newAdmin);

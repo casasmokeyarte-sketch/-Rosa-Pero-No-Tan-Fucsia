@@ -5,7 +5,7 @@ import { BusinessConfig, User } from '../types';
 interface InitialSetupProps {
   config: BusinessConfig;
   bootstrapUser: User;
-  onComplete: (config: BusinessConfig, admin: User) => Promise<void>;
+  onComplete: (config: BusinessConfig, admin: User, setupToken: string) => Promise<void>;
 }
 
 export default function InitialSetup({ config, bootstrapUser, onComplete }: InitialSetupProps) {
@@ -23,6 +23,7 @@ export default function InitialSetup({ config, bootstrapUser, onComplete }: Init
   const [logoUrl, setLogoUrl] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminUsername, setAdminUsername] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -64,6 +65,10 @@ export default function InitialSetup({ config, bootstrapUser, onComplete }: Init
       setError('La contraseña debe tener mínimo 8 caracteres.');
       return;
     }
+    if (setupToken.trim().length < 24) {
+      setError('La clave de instalación debe tener mínimo 24 caracteres.');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden.');
       return;
@@ -93,11 +98,16 @@ export default function InitialSetup({ config, bootstrapUser, onComplete }: Init
           username: cleanUsername,
           fullName: adminName.trim(),
           password
-        }
+        },
+        setupToken.trim()
       );
     } catch (setupError) {
       console.error('Initial company setup failed:', setupError);
-      setError('No fue posible completar la configuración. Revisa Supabase e intenta nuevamente.');
+      setError(
+        setupError instanceof Error
+          ? setupError.message
+          : 'No fue posible completar la configuración. Revisa Supabase e intenta nuevamente.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -148,6 +158,7 @@ export default function InitialSetup({ config, bootstrapUser, onComplete }: Init
 
           <section className="space-y-4">
             <h2 className="text-xs font-bold text-cyber-blue uppercase font-mono border-b border-slate-800 pb-2">2. Administrador principal</h2>
+            <div><label className={labelClass}>Clave privada de instalación *</label><input type="password" className={inputClass} value={setupToken} onChange={e => setSetupToken(e.target.value)} autoComplete="off" required /></div>
             <div><label className={labelClass}>Nombre completo *</label><input className={inputClass} value={adminName} onChange={e => setAdminName(e.target.value)} required /></div>
             <div><label className={labelClass}>Nombre de usuario *</label><input className={inputClass} value={adminUsername} onChange={e => setAdminUsername(e.target.value)} autoComplete="username" required /></div>
             <div>
@@ -160,7 +171,7 @@ export default function InitialSetup({ config, bootstrapUser, onComplete }: Init
             <div><label className={labelClass}>Confirmar contraseña *</label><input type="password" className={inputClass} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" required /></div>
 
             <div className="bg-cyber-blue/10 border border-cyber-blue/30 rounded-lg p-3 text-[10px] text-gray-300 leading-relaxed">
-              El sistema permanecerá bloqueado hasta guardar correctamente la empresa y el administrador. Después ingresarás con el usuario y la contraseña definidos aquí.
+              La clave de instalación debe coincidir con el secreto configurado en Supabase. Solo se usa una vez. Después ingresarás con el usuario y la contraseña definidos aquí.
             </div>
 
             {error && <div className="bg-red-950/40 border border-red-500/50 text-red-200 rounded-lg p-3 text-xs">{error}</div>}

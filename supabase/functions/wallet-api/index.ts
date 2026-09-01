@@ -19,6 +19,7 @@ const JSON_HEADERS = {
   "Referrer-Policy": "no-referrer",
 };
 const MAX_BODY_BYTES = 32_768;
+const INITIAL_SETUP_MAX_BODY_BYTES = 1_500_000;
 const DATA_TABLES = new Set([
   "business_config",
   "users",
@@ -69,11 +70,56 @@ const RESTRICTED_PRODUCT_TERMS = [
   "aguja",
   "tinta tatuar",
 ];
+const INITIAL_ADMIN_PERMISSIONS = {
+  dashboard: true,
+  facturacion: true,
+  compras_web: true,
+  domicilios: true,
+  clientes: true,
+  wallet: true,
+  inventario: true,
+  caja: true,
+  historial_cierres: true,
+  cartera: true,
+  gastos: true,
+  identificadortlf: true,
+  chatsoporte: true,
+  configuraciones: true,
+  solicitudes_clientes: true,
+  historial_facturas: true,
+  nomina: true,
+  creditos: true,
+  crear_factura: true,
+  editar_cliente: true,
+  eliminar_cliente: true,
+  ajustar_stock: true,
+  traspaso_inventario: true,
+  abrir_cerrar_caja: true,
+  registrar_gasto: true,
+  abonar_cartera: true,
+  modificar_configuracion: true,
+  gestionar_usuarios: true,
+  autorizar_descuentos: true,
+  imprimir_facturas: true,
+  editar_facturas: true,
+  eliminar_facturas: true,
+  imprimir_clientes: true,
+  eliminar_inventario: true,
+  imprimir_inventario: true,
+  editar_gastos: true,
+  eliminar_gastos: true,
+  imprimir_gastos: true,
+  imprimir_cartera: true,
+  editar_domicilios: true,
+  imprimir_domicilios: true,
+  imprimir_cierres: true,
+};
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const sessionPepper = Deno.env.get("WALLET_SESSION_PEPPER") ?? "";
 const nfcPepper = Deno.env.get("WALLET_NFC_PEPPER") ?? "";
+const setupToken = Deno.env.get("WALLET_SETUP_TOKEN") ?? "";
 const boldIdentityKey = Deno.env.get("BOLD_IDENTITY_KEY") ?? "";
 const boldSecretKey = Deno.env.get("BOLD_WEBHOOK_SECRET") ?? "";
 const boldRedirectUrl = Deno.env.get("WALLET_BOLD_REDIRECT_URL") ?? "";
@@ -395,12 +441,15 @@ function webBoldOrderReference(): string {
   return `WEB-${timestamp}-${random}`;
 }
 
-async function parseJson(req: Request): Promise<Record<string, unknown>> {
+async function parseJson(
+  req: Request,
+  maxBodyBytes = MAX_BODY_BYTES,
+): Promise<Record<string, unknown>> {
   const declaredLength = Number(req.headers.get("content-length") ?? "0");
-  if (declaredLength > MAX_BODY_BYTES) throw new Error("Request body is too large");
+  if (declaredLength > maxBodyBytes) throw new Error("Request body is too large");
 
   const raw = await req.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
+  if (new TextEncoder().encode(raw).byteLength > maxBodyBytes) {
     throw new Error("Request body is too large");
   }
 
@@ -410,6 +459,79 @@ async function parseJson(req: Request): Promise<Record<string, unknown>> {
     throw new Error("JSON object expected");
   }
   return parsed as Record<string, unknown>;
+}
+
+async function completeInitialSetup(
+  req: Request,
+  origin: string | null,
+): Promise<Response> {
+  const body = await parseJson(req, INITIAL_SETUP_MAX_BODY_BYTES);
+  if (setupToken.length < 24) throw new Error("WALLET_SETUP_NOT_CONFIGURED");
+  const presentedSetupToken = requiredString(body.setup_token, "setup_token", 512);
+  const [expectedTokenHash, presentedTokenHash] = await Promise.all([
+    sha256Hex(`${setupToken}:${sessionPepper}`),
+    sha256Hex(`${presentedSetupToken}:${sessionPepper}`),
+  ]);
+  if (expectedTokenHash !== presentedTokenHash) throw new Error("SETUP_TOKEN_INVALID");
+  const config = requiredDataRecord(body.config);
+  const administrator = requiredDataRecord(body.administrator);
+
+  const username = requiredString(administrator.username, "username", 30).toLowerCase();
+  if (!/^[a-z0-9._-]{3,30}$/.test(username)) {
+    throw new Error("Invalid administrator username");
+  }
+  const password = requiredString(administrator.password, "password", 256);
+  if (password.length < 8) throw new Error("password must contain at least 8 characters");
+
+  const taxRate = Number(config.taxRate ?? 0);
+  if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+    throw new Error("tax_rate is outside the allowed range");
+  }
+
+  const logoUrl = optionalString(config.logoUrl, 1_400_000);
+  if (logoUrl && !logoUrl.startsWith("data:image/") && !/^https:\/\//i.test(logoUrl)) {
+    throw new Error("Invalid logo URL");
+  }
+
+  const { data, error } = await admin.rpc("complete_initial_company_setup", {
+    p_company_name: requiredString(config.companyName, "company_name", 200),
+    p_commercial_name: requiredString(config.commercialName, "commercial_name", 200),
+    p_rut: requiredString(config.rut, "rut", 80),
+    p_city: requiredString(config.city, "city", 160),
+    p_address: requiredString(config.address, "address", 300),
+    p_phone: requiredString(config.phone, "phone", 80),
+    p_email: requiredString(config.email, "email", 200),
+    p_website: optionalString(config.website, 300),
+    p_slogan: optionalString(config.slogan, 300),
+    p_logo_url: logoUrl,
+    p_invoice_prefix: requiredString(config.invoicePrefix, "invoice_prefix", 10).toUpperCase(),
+    p_tax_rate: taxRate,
+    p_currency: "COP",
+    p_payment_methods: Array.isArray(config.paymentMethods)
+      ? config.paymentMethods.slice(0, 20)
+      : ["Efectivo", "Tarjeta", "Transferencia", "Crédito"],
+    p_product_categories: Array.isArray(config.productCategories)
+      ? config.productCategories.slice(0, 100)
+      : ["General"],
+    p_admin_username: username,
+    p_admin_full_name: requiredString(administrator.fullName, "administrator name", 200),
+    p_admin_password: password,
+    p_admin_permissions: INITIAL_ADMIN_PERMISSIONS,
+  });
+
+  if (error) {
+    if (error.message.includes("SETUP_ALREADY_COMPLETED")) {
+      throw new Error("SETUP_ALREADY_COMPLETED");
+    }
+    throw error;
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  return response(origin, 201, {
+    ok: true,
+    company_id: String(result?.company_id ?? "singleton"),
+    administrator_id: String(result?.administrator_id ?? "bootstrap-admin"),
+  });
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -1723,7 +1845,10 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 9 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 10 });
+    }
+    if (req.method === "POST" && route === "/setup/initial") {
+      return await completeInitialSetup(req, origin);
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -1744,6 +1869,24 @@ Deno.serve(async (req) => {
     }
     if (message === "FORBIDDEN") {
       return response(origin, 403, { ok: false, error: "No tienes permiso para esta acción." });
+    }
+    if (message === "SETUP_ALREADY_COMPLETED") {
+      return response(origin, 409, {
+        ok: false,
+        error: "Esta instalación ya fue configurada.",
+      });
+    }
+    if (message === "SETUP_TOKEN_INVALID") {
+      return response(origin, 403, {
+        ok: false,
+        error: "La clave privada de instalación no es válida.",
+      });
+    }
+    if (message === "WALLET_SETUP_NOT_CONFIGURED") {
+      return response(origin, 503, {
+        ok: false,
+        error: "La clave privada de instalación aún no está configurada en Supabase.",
+      });
     }
     if (message === "BOLD_NOT_CONFIGURED") {
       return response(origin, 503, {
@@ -1810,7 +1953,10 @@ Deno.serve(async (req) => {
       message.includes("wallet amount exceeds") ||
       message.includes("Product not found") ||
       message.includes("Invalid product quantity") ||
-      message.includes("Insufficient product stock")
+      message.includes("Insufficient product stock") ||
+      message.includes("Invalid administrator username") ||
+      message.includes("password must contain") ||
+      message.includes("Invalid logo URL")
     ) {
       return response(origin, 400, { ok: false, error: message });
     }

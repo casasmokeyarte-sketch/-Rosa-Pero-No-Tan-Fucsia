@@ -1,8 +1,11 @@
-const DEFAULT_WALLET_API_URL =
-  'https://ekutrlduqdvfprtuigaf.supabase.co/functions/v1/wallet-api';
+const configuredWalletApiUrl = import.meta.env.VITE_WALLET_API_URL as string | undefined;
+const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const derivedWalletApiUrl = configuredSupabaseUrl
+  ? `${configuredSupabaseUrl.replace(/\/$/, '')}/functions/v1/wallet-api`
+  : '';
 
 export const WALLET_API_URL = (
-  import.meta.env.VITE_WALLET_API_URL || DEFAULT_WALLET_API_URL
+  configuredWalletApiUrl || derivedWalletApiUrl
 ).replace(/\/$/, '');
 
 const sessionKey = (clientId: string) => `wallet_session_${clientId}`;
@@ -151,6 +154,9 @@ export type TopupIntent = {
 type ApiOptions = RequestInit & { token?: string | null };
 
 async function walletRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  if (!WALLET_API_URL) {
+    throw new Error('El servicio seguro no está configurado para esta instalación.');
+  }
   const { token, headers, ...requestOptions } = options;
   const response = await fetch(`${WALLET_API_URL}${path}`, {
     ...requestOptions,
@@ -224,6 +230,20 @@ export async function loginWalletOperator(username: string, password: string) {
     method: 'POST',
     body: JSON.stringify({ username, password })
   });
+}
+
+export async function completeInitialCompanySetup(
+  config: Record<string, unknown>,
+  administrator: Record<string, unknown>,
+  setupToken: string
+) {
+  return walletRequest<{ ok: true; company_id: string; administrator_id: string }>(
+    '/setup/initial',
+    {
+      method: 'POST',
+      body: JSON.stringify({ config, administrator, setup_token: setupToken })
+    }
+  );
 }
 
 export async function loginWalletClient(code: string, password: string) {
