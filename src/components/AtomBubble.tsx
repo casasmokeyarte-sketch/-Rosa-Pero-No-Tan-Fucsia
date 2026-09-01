@@ -150,34 +150,6 @@ export default function AtomBubble({
   // Filter messages for active chat
   const activeMessages = chatMessages.filter(msg => msg.clientId === activeChatClientId);
 
-  // Simulated automated response for the client when they send a message
-  const triggerClientSimulatedResponse = (textInput: string) => {
-    if (type !== 'client' || !client) return;
-
-    const inputLower = textInput.toLowerCase();
-    const assignedAgentName = client.assignedAgentName || 'Operaciones General';
-
-    setTimeout(() => {
-      let replyText = '';
-      if (inputLower.includes('pedido') || inputLower.includes('despacho') || inputLower.includes('orden')) {
-        replyText = `Entendido. Verificamos que tu cuenta registra despacho activo. Si acabas de emitir una orden online, su estatus está como 'Pendiente' en el sistema logístico de Rosa Fuerte.`;
-      } else if (inputLower.includes('hola') || inputLower.includes('buenos') || inputLower.includes('saludos')) {
-        replyText = `Conexión establecida con éxito encriptado. Reportando el búnker central. Estoy a la espera de atender tu despacho prioritario.`;
-      } else if (inputLower.includes('demora') || inputLower.includes('tarde') || inputLower.includes('retraso')) {
-        replyText = `Nuestras unidades de mensajería operan con máxima prioridad. Por favor revisa la sección 'Trayectoria' o confirma con tu asesor.`;
-      } else {
-        replyText = `Mensaje transmitido a la central operativa de Rosa Fuerte. Su caso está asignado al canal de [${assignedAgentName}].`;
-      }
-
-      onSendMessage(
-        client.id,
-        replyText,
-        'agent',
-        client.assignedAgentName || 'Asistente Digital'
-      );
-    }, 1800);
-  };
-
   // Handle message send (text only)
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,12 +166,7 @@ export default function AtomBubble({
       senderName
     );
 
-    const textCopy = inputText.trim();
     setInputText('');
-
-    if (type === 'client') {
-      triggerClientSimulatedResponse(textCopy);
-    }
   };
 
   // Handle voice record start
@@ -339,9 +306,6 @@ export default function AtomBubble({
       attachment
     );
 
-    if (thisType() === 'client') {
-      triggerClientSimulatedResponse(`[Archivo adjunto: ${type}]`);
-    }
   };
 
   const thisType = (): 'client' | 'agent' => {

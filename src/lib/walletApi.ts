@@ -7,6 +7,7 @@ export const WALLET_API_URL = (
 
 const sessionKey = (clientId: string) => `wallet_session_${clientId}`;
 const operatorSessionKey = (userId: string) => `wallet_operator_session_${userId}`;
+const ACTIVE_OPERATOR_KEY = 'wallet_active_operator_id';
 
 export type WalletSummary = {
   wallet_account_id: string;
@@ -192,10 +193,25 @@ export function getWalletOperatorSession(userId: string): string | null {
 
 export function saveWalletOperatorSession(userId: string, token: string): void {
   sessionStorage.setItem(operatorSessionKey(userId), token);
+  sessionStorage.setItem(ACTIVE_OPERATOR_KEY, userId);
 }
 
 export function clearWalletOperatorSession(userId: string): void {
   sessionStorage.removeItem(operatorSessionKey(userId));
+  if (sessionStorage.getItem(ACTIVE_OPERATOR_KEY) === userId) {
+    sessionStorage.removeItem(ACTIVE_OPERATOR_KEY);
+  }
+}
+
+export function getActiveWalletOperatorSession(): string | null {
+  const userId = sessionStorage.getItem(ACTIVE_OPERATOR_KEY);
+  return userId ? getWalletOperatorSession(userId) : null;
+}
+
+export function clearActiveWalletOperatorSession(): void {
+  const userId = sessionStorage.getItem(ACTIVE_OPERATOR_KEY);
+  if (userId) sessionStorage.removeItem(operatorSessionKey(userId));
+  sessionStorage.removeItem(ACTIVE_OPERATOR_KEY);
 }
 
 export async function loginWalletOperator(username: string, password: string) {
@@ -216,9 +232,92 @@ export async function loginWalletClient(code: string, password: string) {
     token: string;
     expires_at: string;
     actor: { id: string; name: string; type: 'client' };
+    client: Record<string, unknown>;
+    requires_password_change: boolean;
   }>('/login/client', {
     method: 'POST',
     body: JSON.stringify({ code, password })
+  });
+}
+
+export async function changeWalletClientPassword(
+  token: string,
+  newPassword: string
+) {
+  return walletRequest<{ ok: true }>('/client/password', {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ new_password: newPassword })
+  });
+}
+
+export async function fetchWalletClientChat(token: string) {
+  return walletRequest<{ ok: true; data: Record<string, unknown>[] }>(
+    '/client/chat',
+    { token }
+  );
+}
+
+export async function sendWalletClientChatMessage(
+  token: string,
+  message: {
+    id: string;
+    text: string;
+    attachment?: unknown;
+  }
+) {
+  return walletRequest<{ ok: true; data: Record<string, unknown> }>(
+    '/client/chat',
+    {
+      method: 'POST',
+      token,
+      body: JSON.stringify(message)
+    }
+  );
+}
+
+function requireActiveOperatorToken(): string {
+  const token = getActiveWalletOperatorSession();
+  if (!token) throw new Error('No hay una sesión de operador activa.');
+  return token;
+}
+
+export async function fetchSecureDataTable(table: string) {
+  const token = requireActiveOperatorToken();
+  return walletRequest<{ ok: true; data: any[] }>(
+    `/data?table=${encodeURIComponent(table)}`,
+    { token }
+  );
+}
+
+export async function secureDataUpsert(table: string, record: unknown) {
+  const token = requireActiveOperatorToken();
+  return walletRequest<{ ok: true; data: unknown }>('/data/upsert', {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ table, record })
+  });
+}
+
+export async function secureDataDelete(table: string, id: string) {
+  const token = requireActiveOperatorToken();
+  return walletRequest<{ ok: true }>('/data/delete', {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ table, id })
+  });
+}
+
+export async function secureDataDeleteByField(
+  table: string,
+  field: string,
+  value: string | number | boolean
+) {
+  const token = requireActiveOperatorToken();
+  return walletRequest<{ ok: true }>('/data/delete-by-field', {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ table, field, value })
   });
 }
 

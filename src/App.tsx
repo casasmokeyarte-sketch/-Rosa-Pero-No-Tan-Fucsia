@@ -30,7 +30,18 @@ import {
 } from './utils/dummyData';
 import { supabase, isSupabaseEnabled } from './lib/supabase';
 import { fetchConfig, fetchTable, syncUpsert, syncDelete, syncDeleteByField, toCamelCase, mapKeys } from './lib/sync';
-import { loginWalletClient, loginWalletOperator, saveWalletSession } from './lib/walletApi';
+import {
+  changeWalletClientPassword,
+  clearActiveWalletOperatorSession,
+  fetchWalletClientChat,
+  getActiveWalletOperatorSession,
+  getWalletSession,
+  loginWalletClient,
+  loginWalletOperator,
+  saveWalletOperatorSession,
+  saveWalletSession,
+  sendWalletClientChatMessage
+} from './lib/walletApi';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -151,7 +162,7 @@ function safeSetItem(key: string, value: string) {
 
 export default function App() {
   
-  const [isLoadingDB, setIsLoadingDB] = useState<boolean>(isSupabaseEnabled);
+  const [isLoadingDB, setIsLoadingDB] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   
   // State Initialization with lazy LocalStorage loading
@@ -329,7 +340,7 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     const saved = localStorage.getItem('extreme_is_authenticated');
-    return saved === 'true';
+    return saved === 'true' && !!getActiveWalletOperatorSession();
   });
 
   // Client Session & Dual-login states
@@ -428,6 +439,25 @@ export default function App() {
   };
 
   useEffect(() => { safeSetItem('extreme_discounts', JSON.stringify(discounts)); }, [discounts]);
+
+  const handleUpdateDiscounts = (nextDiscounts: Discount[]) => {
+    const previousDiscounts = discounts;
+    setDiscounts(nextDiscounts);
+
+    if (!isSupabaseEnabled) return;
+
+    const nextIds = new Set(nextDiscounts.map(discount => discount.id));
+    const removed = previousDiscounts.filter(discount => !nextIds.has(discount.id));
+    const changed = nextDiscounts.filter(discount => {
+      const previous = previousDiscounts.find(item => item.id === discount.id);
+      return !previous || JSON.stringify(previous) !== JSON.stringify(discount);
+    });
+
+    void Promise.allSettled([
+      ...changed.map(discount => syncUpsert('discounts', discount)),
+      ...removed.map(discount => syncDelete('discounts', discount.id))
+    ]);
+  };
 
   useEffect(() => { safeSetItem('extreme_users', JSON.stringify(users)); }, [users]);
 
@@ -598,7 +628,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = (
+  const handleSendMessage = async (
     clientId: string, 
     text: string, 
     sender: 'client' | 'agent', 
@@ -615,8 +645,90 @@ export default function App() {
       attachment
     };
     setChatMessages(prev => [...prev, newMsg]);
-    if (isSupabaseEnabled) syncUpsert('chat_messages', newMsg);
+
+    try {
+      if (sender === 'client' && currentClient?.id === clientId) {
+        const token = getWalletSession(clientId);
+        if (!token) throw new Error('La sesión del cliente venció. Inicia sesión nuevamente.');
+        const result = await sendWalletClientChatMessage(token, {
+          id: newMsg.id,
+          text: newMsg.text,
+          attachment: newMsg.attachment
+        });
+        const savedMessage = mapKeys(result.data, toCamelCase) as ChatMessage;
+        setChatMessages(prev => prev.map(message =>
+          message.id === newMsg.id ? savedMessage : message
+        ));
+      } else if (sender === 'agent' && currentClient) {
+        // Mensajes automáticos visibles en el portal no pueden suplantar a un asesor.
+        return;
+      } else if (isSupabaseEnabled) {
+        await syncUpsert('chat_messages', newMsg);
+      }
+    } catch (error) {
+      setChatMessages(prev => prev.filter(message => message.id !== newMsg.id));
+      showToast(
+        error instanceof Error ? error.message : 'No fue posible enviar el mensaje.',
+        'error'
+      );
+    }
   };
+
+  useEffect(() => {
+    if (!currentClient) return;
+    const token = getWalletSession(currentClient.id);
+    if (!token) return;
+
+    let active = true;
+    const refreshClientChat = async () => {
+      try {
+        const result = await fetchWalletClientChat(token);
+        if (!active) return;
+        const remoteMessages = result.data.map(row =>
+          mapKeys(row, toCamelCase) as ChatMessage
+        );
+        setChatMessages(remoteMessages.sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        ));
+      } catch (error) {
+        console.warn('No fue posible actualizar el chat del cliente:', error);
+      }
+    };
+
+    void refreshClientChat();
+    const timer = window.setInterval(refreshClientChat, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [currentClient?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !getActiveWalletOperatorSession()) return;
+    let active = true;
+    const refreshOperatorChat = async () => {
+      try {
+        const remoteMessages = await fetchTable('chat_messages');
+        if (!active) return;
+        setChatMessages(prev => {
+          const merged = new Map(prev.map(message => [message.id, message]));
+          remoteMessages.forEach(message => merged.set(message.id, message));
+          return Array.from(merged.values()).sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+        });
+      } catch (error) {
+        console.warn('No fue posible actualizar el chat del operador:', error);
+      }
+    };
+
+    void refreshOperatorChat();
+    const timer = window.setInterval(refreshOperatorChat, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isAuthenticated]);
 
   const handleAssignAgent = (clientId: string, agentId: string, agentName: string) => {
     let updatedClient: Client | undefined;
@@ -686,18 +798,18 @@ export default function App() {
         loginPassword
       );
 
-      const user = users.find(
+      saveWalletOperatorSession(result.actor.id, result.token);
+      const dbUsers = await fetchTable('users');
+      const user = dbUsers.find(
         candidate => candidate.id === result.actor.id
       );
 
       if (!user) {
-        setLoginError(
-          "USUARIO NO DISPONIBLE: Actualiza la página e intenta nuevamente."
-        );
-        return;
+        clearActiveWalletOperatorSession();
+        throw new Error('Authenticated user is unavailable');
       }
 
-      saveWalletSession(user.id, result.token);
+      setUsers(dbUsers);
       setCurrentUser(user);
       setIsAuthenticated(true);
       setLoginPassword('');
@@ -719,11 +831,15 @@ export default function App() {
         clientLoginPassword
       );
 
-      const clientToLogin = clients.find(
-        client => client.id === result.actor.id
-      );
+      const localClient = clients.find(client => client.id === result.actor.id);
+      const secureClient = mapKeys(result.client, toCamelCase) as Client;
+      const clientToLogin: Client = {
+        ...(localClient || {} as Client),
+        ...secureClient,
+        password: result.requires_password_change ? '1234' : '__configured__'
+      };
 
-      if (!clientToLogin) {
+      if (!clientToLogin.id) {
         setLoginError(
           "CUENTA NO DISPONIBLE: Actualiza la página e intenta nuevamente."
         );
@@ -735,10 +851,10 @@ export default function App() {
       setLoginError(null);
       setClientLoginRut('');
       setClientLoginPassword('');
-    } catch {
-      setLoginError(
-        "CREDENCIALES INCORRECTAS O ACCESO TEMPORALMENTE BLOQUEADO. Verifica el código y la contraseña."
-      );
+    } catch (error) {
+      setLoginError(error instanceof Error
+        ? error.message
+        : "No fue posible iniciar sesión. Verifica el código y la contraseña.");
     }
   };
 
@@ -1000,7 +1116,10 @@ export default function App() {
 
   // Load database from Supabase on mount
   useEffect(() => {
-    if (!isSupabaseEnabled) return;
+    if (!isSupabaseEnabled || !isAuthenticated || !getActiveWalletOperatorSession()) {
+      setIsLoadingDB(false);
+      return;
+    }
 
     const loadAllData = async () => {
       try {
@@ -1015,14 +1134,17 @@ export default function App() {
         if (dbConfig) {
           setConfig(dbConfig);
         } else {
-          await syncUpsert('business_config', { ...config, id: 'singleton' });
+          // No interrumpir la carga de clientes si business_config no está disponible.
+          console.warn(
+            'business_config no está disponible; se conserva la configuración local.'
+          );
         }
 
         if (dbUsers && dbUsers.length > 0) {
           setUsers(dbUsers);
         } else {
           for (const u of users) {
-            await syncUpsert('users', u);
+            void u; // Conservar usuarios locales sin intentar sembrarlos durante el arranque.
           }
         }
 
@@ -1053,10 +1175,6 @@ export default function App() {
           if (hasDuplicates) {
             console.log("Se detectaron y corrigieron códigos de cliente duplicados.");
           }
-        } else {
-          for (const c of clients) {
-            await syncUpsert('clients', c);
-          }
         }
 
         // Deactivate loading state quickly to show login screen
@@ -1074,10 +1192,6 @@ export default function App() {
             const dbProducts = await fetchTable('products');
             if (dbProducts && dbProducts.length > 0) {
               setProducts(dbProducts);
-            } else if (products.length > 0) {
-              for (const p of products) {
-                await syncUpsert('products', p);
-              }
             }
           } catch (e) {
             console.error("Error cargando products en segundo plano:", e);
@@ -1119,10 +1233,6 @@ export default function App() {
             const dbAdjustments = await fetchTable('stock_adjustments');
             if (dbAdjustments && dbAdjustments.length > 0) {
               setAdjustments(dbAdjustments);
-            } else if (adjustments.length > 0) {
-              for (const adj of adjustments) {
-                await syncUpsert('stock_adjustments', adj);
-              }
             }
           } catch (e) {
             console.error("Error cargando stock_adjustments en segundo plano:", e);
@@ -1133,10 +1243,6 @@ export default function App() {
             const dbTransfers = await fetchTable('stock_transfers');
             if (dbTransfers && dbTransfers.length > 0) {
               setTransfers(dbTransfers);
-            } else if (transfers.length > 0) {
-              for (const tr of transfers) {
-                await syncUpsert('stock_transfers', tr);
-              }
             }
           } catch (e) {
             console.error("Error cargando stock_transfers en segundo plano:", e);
@@ -1157,10 +1263,6 @@ export default function App() {
                 });
                 return merged.sort((a, b) => new Date(a.createdAt || a.timestamp).getTime() - new Date(b.createdAt || b.timestamp).getTime());
               });
-            } else if (chatMessages.length > 0) {
-              for (const msg of chatMessages) {
-                await syncUpsert('chat_messages', msg);
-              }
             }
           } catch (e) {
             console.error("Error cargando chat_messages en segundo plano:", e);
@@ -1171,10 +1273,6 @@ export default function App() {
             const dbClientRequests = await fetchTable('client_requests');
             if (dbClientRequests && dbClientRequests.length > 0) {
               setClientRequests(dbClientRequests);
-            } else if (clientRequests.length > 0) {
-              for (const req of clientRequests) {
-                await syncUpsert('client_requests', req);
-              }
             }
           } catch (e) {
             console.error("Error cargando client_requests en segundo plano:", e);
@@ -1186,9 +1284,9 @@ export default function App() {
             if (dbDiscounts && dbDiscounts.length > 0) {
               setDiscounts(dbDiscounts);
             } else if (discounts.length > 0) {
-              for (const disc of discounts) {
-                await syncUpsert('discounts', disc);
-              }
+              await Promise.allSettled(
+                discounts.map(discount => syncUpsert('discounts', discount))
+              );
             }
           } catch (e) {
             console.error("Error cargando discounts en segundo plano:", e);
@@ -1209,10 +1307,6 @@ export default function App() {
             const dbPayroll = await fetchTable('payroll_entries');
             if (dbPayroll && dbPayroll.length > 0) {
               setPayrollEntries(dbPayroll);
-            } else if (payrollEntries.length > 0) {
-              for (const pe of payrollEntries) {
-                await syncUpsert('payroll_entries', pe);
-              }
             }
           } catch (e) {
             console.error("Error cargando payroll_entries en segundo plano:", e);
@@ -1250,11 +1344,11 @@ export default function App() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(e => console.error("Notification permission request failed:", e));
     }
-  }, []);
+  }, [isAuthenticated]);
 
   // Real-time synchronization (Supabase Realtime) to reflect inserts/updates/deletes instantly
   useEffect(() => {
-    if (!isSupabaseEnabled || !supabase) return;
+    if (!isSupabaseEnabled || !supabase || !isAuthenticated) return;
 
     const handleRealtimePayload = async (payload: any) => {
       console.log('Realtime change detected:', payload);
@@ -1486,7 +1580,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isSupabaseEnabled]);
+  }, [isSupabaseEnabled, isAuthenticated]);
 
   // Handle Bold payment redirect callback at root level (on mount)
   useEffect(() => {
@@ -2928,10 +3022,9 @@ export default function App() {
             password: newClientPassword.trim()
           };
 
-          // Sync to Supabase
-          if (isSupabaseEnabled) {
-            await syncUpsert('clients', updatedClient);
-          }
+          const token = getWalletSession(currentClient.id);
+          if (!token) throw new Error('La sesión del cliente venció. Inicia sesión nuevamente.');
+          await changeWalletClientPassword(token, newClientPassword.trim());
 
           // Update local state
           setClients(prev => prev.map(c => c.id === currentClient.id ? updatedClient : c));
@@ -3044,6 +3137,7 @@ export default function App() {
         products={products}
         invoices={invoices}
         config={config}
+        discounts={discounts}
         onAddInvoice={handleAddInvoice}
         onLogout={() => setCurrentClient(null)}
         chatMessages={chatMessages}
@@ -3675,6 +3769,7 @@ export default function App() {
           {/* Security Lock / Logout Button */}
           <button 
             onClick={() => {
+              clearActiveWalletOperatorSession();
               setIsAuthenticated(false);
               localStorage.removeItem('extreme_current_user');
             }}
@@ -3949,7 +4044,7 @@ export default function App() {
               onResetDatabase={handleResetDatabase}
               onImportDatabase={handleImportDatabase}
               discounts={discounts}
-              onUpdateDiscounts={setDiscounts}
+              onUpdateDiscounts={handleUpdateDiscounts}
               flashMessages={flashMessages}
               onUpdateFlashMessages={setFlashMessages}
               soundSettings={soundSettings}

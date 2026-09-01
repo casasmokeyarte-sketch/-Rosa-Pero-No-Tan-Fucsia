@@ -19,6 +19,28 @@ const JSON_HEADERS = {
   "Referrer-Policy": "no-referrer",
 };
 const MAX_BODY_BYTES = 32_768;
+const DATA_TABLES = new Set([
+  "business_config",
+  "users",
+  "clients",
+  "products",
+  "invoices",
+  "expenses",
+  "shifts",
+  "stock_adjustments",
+  "stock_transfers",
+  "chat_messages",
+  "client_requests",
+  "discounts",
+  "flash_messages",
+  "payroll_entries",
+]);
+const ADMIN_WRITE_TABLES = new Set([
+  "business_config",
+  "discounts",
+  "users",
+  "payroll_entries",
+]);
 const SESSION_HOURS_OPERATOR = 12;
 const SESSION_HOURS_CLIENT = 24 * 7;
 const LOGIN_WINDOW_MINUTES = 15;
@@ -130,6 +152,180 @@ function optionalString(value: unknown, maxLength = 200): string | null {
   const normalized = value.trim();
   if (normalized.length > maxLength) throw new Error("Text value is too long");
   return normalized || null;
+}
+
+function requiredDataTable(value: unknown): string {
+  const table = requiredString(value, "table", 80);
+  if (!DATA_TABLES.has(table)) throw new Error("Unsupported data table");
+  return table;
+}
+
+function requiredDataRecord(value: unknown): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new Error("record must be a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireDataWriteAccess(session: WalletSession, table: string): void {
+  requireOperator(session);
+  if (ADMIN_WRITE_TABLES.has(table)) requireAdministrator(session);
+}
+
+type ActiveWebPromotion = {
+  id: string;
+  name: string;
+  amount: number;
+};
+
+function bogotaDateParts(now = new Date()): {
+  date: string;
+  time: string;
+  day: number;
+} {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    weekday: "short",
+  }).formatToParts(now);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    time: `${value("hour")}:${value("minute")}`,
+    day: weekdayMap[value("weekday")] ?? now.getUTCDay(),
+  };
+}
+
+async function activeWebPromotion(
+  clientId: string,
+  subtotal: number,
+): Promise<ActiveWebPromotion | null> {
+  if (!Number.isFinite(subtotal) || subtotal <= 0) return null;
+
+  const { data: client, error: clientError } = await admin
+    .from("clients")
+    .select("special_discount_percentage")
+    .eq("id", clientId)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  if (Number(client?.special_discount_percentage ?? 0) > 0) return null;
+
+  const { data: promotions, error } = await admin
+    .from("discounts")
+    .select("id,name,type,value,start_date,end_date,start_time,end_time,active_days,applies_to")
+    .eq("active", true)
+    .in("applies_to", ["todos", "compras_web"]);
+  if (error) throw error;
+
+  const bogota = bogotaDateParts();
+  const eligible = (promotions ?? [])
+    .filter((promotion) => {
+      if (promotion.start_date && bogota.date < promotion.start_date) return false;
+      if (promotion.end_date && bogota.date > promotion.end_date) return false;
+      if (promotion.start_time && bogota.time < promotion.start_time) return false;
+      if (promotion.end_time && bogota.time > promotion.end_time) return false;
+      if (
+        Array.isArray(promotion.active_days) &&
+        promotion.active_days.length > 0 &&
+        !promotion.active_days.includes(bogota.day)
+      ) return false;
+      return true;
+    })
+    .map((promotion) => {
+      const rawAmount = promotion.type === "porcentaje"
+        ? subtotal * Number(promotion.value ?? 0) / 100
+        : Number(promotion.value ?? 0);
+      return {
+        id: String(promotion.id),
+        name: String(promotion.name),
+        amount: Math.min(subtotal, Math.max(0, Math.round(rawAmount))),
+      };
+    })
+    .filter((promotion) => promotion.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  return eligible[0] ?? null;
+}
+
+async function applyWebPromotionToResult(
+  rawResult: Record<string, unknown>,
+  clientId: string,
+  updateBoldIntent = false,
+): Promise<Record<string, unknown>> {
+  const invoiceValue = rawResult.invoice;
+  const invoice = typeof invoiceValue === "object" && invoiceValue !== null
+    ? invoiceValue as Record<string, unknown>
+    : null;
+  if (!invoice || Number(invoice.discount ?? 0) > 0) return rawResult;
+
+  const invoiceId = requiredString(invoice.id, "invoice_id", 120);
+  const subtotal = Number(invoice.subtotal ?? 0);
+  const promotion = await activeWebPromotion(clientId, subtotal);
+  if (!promotion) return rawResult;
+
+  const deliveryFee = Number(invoice.delivery_fee ?? 0);
+  const walletPaidAmount = Number(invoice.wallet_paid_amount ?? 0);
+  const total = Math.max(0, Math.round(subtotal - promotion.amount + deliveryFee));
+  const amountDue = Math.max(0, Math.round(total - walletPaidAmount));
+  const paymentStatus = amountDue <= 0 ? "Pagado" : "Pendiente";
+
+  const { data: updatedInvoice, error: invoiceError } = await admin
+    .from("invoices")
+    .update({
+      discount: promotion.amount,
+      total,
+      amount_due: amountDue,
+      payment_status: paymentStatus,
+    })
+    .eq("id", invoiceId)
+    .select()
+    .single();
+  if (invoiceError) throw invoiceError;
+
+  let updatedIntent = rawResult.intent;
+  if (updateBoldIntent) {
+    const intentValue = rawResult.intent;
+    const intent = typeof intentValue === "object" && intentValue !== null
+      ? intentValue as Record<string, unknown>
+      : null;
+    if (!intent) throw new Error("Direct Bold payment intent was not returned");
+    const intentId = requiredString(intent.id, "intent_id", 120);
+    const { data: savedIntent, error: intentError } = await admin
+      .from("web_bold_payment_intents")
+      .update({ amount: total })
+      .eq("id", intentId)
+      .select()
+      .single();
+    if (intentError) throw intentError;
+    updatedIntent = savedIntent;
+  }
+
+  return {
+    ...rawResult,
+    invoice: updatedInvoice,
+    intent: updatedIntent,
+    promotion: {
+      id: promotion.id,
+      name: promotion.name,
+      amount: promotion.amount,
+    },
+  };
 }
 
 function normalizeUid(value: string): string {
@@ -310,6 +506,24 @@ async function login(
     return response(origin, 401, { ok: false, error: "Credenciales incorrectas." });
   }
 
+  let clientProfile: Record<string, unknown> | null = null;
+  let requiresPasswordChange = false;
+  if (actorType === "client") {
+    const { data: client, error: clientError } = await admin
+      .from("clients")
+      .select(
+        "id,name,document_type,rut,email,phone,address,credit_limit,outstanding_balance,created_at,assigned_agent_id,assigned_agent_name,code,has_credit,credit_terms_days,credit_conditions,is_employee,special_discount_percentage,discounted_product_ids,chat_sound_tone,notif_sound_tone,password",
+      )
+      .eq("id", actor.actor_id)
+      .single();
+    if (clientError) throw clientError;
+    if (!client) throw new Error("Client profile not found");
+    const { password: legacyPassword, ...safeClient } = client;
+    requiresPasswordChange = !String(legacyPassword ?? "").trim() ||
+      String(legacyPassword).trim() === "1234";
+    clientProfile = safeClient;
+  }
+
   const rawToken = randomToken();
   const tokenHash = await sha256Hex(`${rawToken}:${sessionPepper}`);
   const sessionHours = actorType === "operator"
@@ -354,6 +568,12 @@ async function login(
       role: actor.actor_role,
       type: actorType,
     },
+    ...(actorType === "client"
+      ? {
+        client: clientProfile,
+        requires_password_change: requiresPasswordChange,
+      }
+      : {}),
   });
 }
 
@@ -497,6 +717,145 @@ async function handleAuthenticated(
       actor: await getActor(session),
       expires_at: session.expires_at,
     });
+  }
+
+  if (req.method === "PATCH" && route === "/client/password") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const body = await parseJson(req);
+    const newPassword = requiredString(body.new_password, "new_password", 256);
+    if (newPassword === "1234") {
+      throw new Error("La contraseña nueva no puede ser la clave temporal.");
+    }
+
+    const { error } = await admin
+      .from("clients")
+      .update({ password: newPassword })
+      .eq("id", session.client_id);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && route === "/client/chat") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const { data, error } = await admin
+      .from("chat_messages")
+      .select("id,client_id,sender,sender_name,text,attachment,timestamp")
+      .eq("client_id", session.client_id)
+      .order("timestamp", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data: (data ?? []).reverse() });
+  }
+
+  if (req.method === "POST" && route === "/client/chat") {
+    if (session.actor_type !== "client" || !session.client_id) {
+      throw new Error("FORBIDDEN");
+    }
+    const body = await parseJson(req);
+    const id = requiredString(body.id, "id", 160);
+    const messageText = optionalString(body.text, 4000) ?? "";
+    const attachment = body.attachment ?? null;
+    if (!messageText && !attachment) throw new Error("Message content is required");
+    if (attachment !== null) {
+      if (Array.isArray(attachment) || typeof attachment !== "object") {
+        throw new Error("Invalid chat attachment");
+      }
+      if (JSON.stringify(attachment).length > 20_000) {
+        throw new Error("Chat attachment is too large");
+      }
+    }
+
+    const { data: client, error: clientError } = await admin
+      .from("clients")
+      .select("name")
+      .eq("id", session.client_id)
+      .single();
+    if (clientError) throw clientError;
+
+    const { data, error } = await admin
+      .from("chat_messages")
+      .insert({
+        id,
+        client_id: session.client_id,
+        sender: "client",
+        sender_name: client.name,
+        text: messageText,
+        attachment,
+        timestamp: new Date().toISOString(),
+      })
+      .select("id,client_id,sender,sender_name,text,attachment,timestamp")
+      .single();
+    if (error) throw error;
+    return response(origin, 201, { ok: true, data });
+  }
+
+  if (req.method === "GET" && route === "/data") {
+    requireOperator(session);
+    const table = requiredDataTable(url.searchParams.get("table"));
+    let query = admin.from(table).select("*");
+
+    if (table === "chat_messages") {
+      query = query.order("timestamp", { ascending: false }).limit(50);
+    } else if (table === "invoices") {
+      query = query.order("created_at", { ascending: false }).limit(1000);
+    } else if (table === "stock_adjustments") {
+      query = query.order("created_at", { ascending: false }).limit(50);
+    } else if (table === "expenses") {
+      query = query.order("created_at", { ascending: false }).limit(500);
+    } else if (table === "shifts") {
+      query = query.order("start_time", { ascending: false }).limit(30);
+    } else if (table === "payroll_entries") {
+      query = query.order("created_at", { ascending: false }).limit(30);
+    } else if (table === "stock_transfers") {
+      query = query.order("created_at", { ascending: false }).limit(30);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data: data ?? [] });
+  }
+
+  if (req.method === "POST" && route === "/data/upsert") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const record = requiredDataRecord(body.record);
+    const { data, error } = await admin
+      .from(table)
+      .upsert(record)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    return response(origin, 200, { ok: true, data });
+  }
+
+  if (req.method === "POST" && route === "/data/delete") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const id = requiredString(body.id, "id", 160);
+    const { error } = await admin.from(table).delete().eq("id", id);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && route === "/data/delete-by-field") {
+    const body = await parseJson(req);
+    const table = requiredDataTable(body.table);
+    requireDataWriteAccess(session, table);
+    const field = requiredString(body.field, "field", 80);
+    if (!/^[a-z][a-z0-9_]*$/.test(field)) throw new Error("Invalid field name");
+    const value = body.value;
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      throw new Error("Invalid field value");
+    }
+    const { error } = await admin.from(table).delete().eq(field, value);
+    if (error) throw error;
+    return response(origin, 200, { ok: true });
   }
 
   if (req.method === "GET" && route === "/products/wallet-eligibility") {
@@ -953,8 +1312,15 @@ async function handleAuthenticated(
       p_session_id: session.id,
     });
     if (error) throw error;
+    const result = typeof data === "object" && data !== null
+      ? await applyWebPromotionToResult(
+        data as Record<string, unknown>,
+        session.client_id,
+      )
+      : null;
+    if (!result) throw new Error("Failed to create wallet invoice");
 
-    return response(origin, 201, { ok: true, ...data });
+    return response(origin, 201, { ok: true, ...result });
   }
 
   if (req.method === "POST" && route === "/web/bold-payment-intent") {
@@ -1046,16 +1412,22 @@ async function handleAuthenticated(
 
     if (error) throw error;
 
-    const result =
+    const rawResult =
       typeof data === "object" && data !== null
         ? data as Record<string, unknown>
         : null;
 
-    if (!result) {
+    if (!rawResult) {
       throw new Error(
         "Failed to create direct Bold payment intent",
       );
     }
+
+    const result = await applyWebPromotionToResult(
+      rawResult,
+      session.client_id,
+      true,
+    );
 
     const intentValue = result.intent;
     const intent =
@@ -1351,7 +1723,7 @@ Deno.serve(async (req) => {
 
   try {
     if (req.method === "GET" && route === "/health") {
-      return response(origin, 200, { ok: true, service: "wallet-api", version: 5 });
+      return response(origin, 200, { ok: true, service: "wallet-api", version: 9 });
     }
     if (req.method === "POST" && route === "/login/operator") {
       return await login(req, origin, "operator");
@@ -1427,6 +1799,9 @@ Deno.serve(async (req) => {
       message.includes("JSON") ||
       message.includes("too large") ||
       message.includes("Invalid NFC UID") ||
+      message.includes("Unsupported data table") ||
+      message.includes("record must be") ||
+      message.includes("Invalid field") ||
       message.includes("Invalid transaction_id") ||
       message.includes("Unsupported office top-up payment method") ||
       message.includes("Unsupported delivery method") ||
